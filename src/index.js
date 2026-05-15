@@ -13,7 +13,7 @@ context-mcp — Persistent AI memory MCP server (stdio transport)
 
 Usage:
   context-mcp [options]
-  npx context-mcp@latest [options]
+  npx context-mcp-server@latest [options]
 
 Options:
   --data-dir <path>   Override storage directory (default: ~/.context-mcp)
@@ -21,7 +21,7 @@ Options:
   --help, -h          Show this help
 
 Platform setup (stdio):
-  Claude Code:   claude mcp add context-mcp npx context-mcp@latest
+  Claude Code:   claude mcp add context-mcp npx context-mcp-server@latest
   Cursor:        add to .cursor/mcp.json
   VS Code:       add to .vscode/mcp.json
   Gemini CLI:    add to .gemini/settings.json

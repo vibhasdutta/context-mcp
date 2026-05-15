@@ -395,8 +395,9 @@ export function countContext(project) {
   return store.contexts.filter(c => c.project === project || c.project === 'global').length;
 }
 
-// Ensure a project entity exists for this name; returns the project record
-export function ensureProject(name) {
+// Ensure a project entity exists for this name; returns the project record.
+// If rootPath is provided and the project has no rootPath yet, it is stored.
+export function ensureProject(name, rootPath) {
   if (!name || name === 'global') return null;
   const store = load();
   let proj = store.projects.find(p => p.name === name);
@@ -406,7 +407,19 @@ export function ensureProject(name) {
     _changedProjectIds.add(proj.id);
     markDirty();
   }
+  if (rootPath && !proj.rootPath) {
+    proj.rootPath = rootPath;
+    _changedProjectIds.add(proj.id);
+    markDirty();
+  }
   return proj;
+}
+
+// Returns the stored rootPath for a project, or null if not set.
+export function getProjectRoot(name) {
+  if (!name || name === 'global') return null;
+  const store = load();
+  return store.projects.find(p => p.name === name)?.rootPath || null;
 }
 
 export function listProjects() {

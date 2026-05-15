@@ -2,7 +2,7 @@
 
 Persistent memory and codebase knowledge graph for AI coding assistants — delivered as a single MCP server.
 
-One shared context store. Works across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, and any MCP-compatible tool. Save context from one AI, pick it up in another. Your memory follows the project, not the tool.
+One shared context store. Works across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Claude.ai, and ChatGPT. Save context from one AI, pick it up in another. Your memory follows the project, not the tool.
 
 ---
 
@@ -20,41 +20,40 @@ This gets worse as projects grow. A codebase with 50 files means the AI either r
 AI assistants have no memory. Every new chat is a blank slate. context-mcp gives the AI a persistent store of decisions, bugs, notes, and architecture — loaded automatically at conversation start.
 
 **2. Context is siloed to one tool.**
-You fix a bug with Claude Code, then open Cursor and it knows nothing about it. You run Gemini CLI and have to explain the whole project again. context-mcp stores everything in `~/.context-mcp/` — a single shared store on your machine. Any AI that connects to this MCP server gets the same context, regardless of which tool saved it.
+You fix a bug with Claude Code, then open Cursor and it knows nothing about it. context-mcp stores everything in `~/.context-mcp/` — a single shared store on your machine. Any AI that connects reads and writes the same store.
 
-**3. File changes from anywhere are automatically reflected.**
-Edit a file in VSCode, make changes through the web, modify from any tool — the knowledge graph sees the file as changed on next build. The context store is on disk, not tied to any session or IDE.
-
-**4. Structural understanding costs too many tokens.**
+**3. Structural understanding costs too many tokens.**
 Reading 20 files to answer "what calls this function?" is wasteful. context-mcp builds a knowledge graph of your codebase once, then answers structural questions in ~500 tokens instead of ~50,000.
 
-**5. Repeated enrichment is expensive.**
+**4. Repeated enrichment is expensive.**
 AI-written descriptions of your code nodes are computed once and stored permanently. They survive file changes, rebuilds, and new conversations — never paid for twice.
 
 ---
 
 ## Installation
 
-context-mcp has two packages:
-
-| Package | What it does | Install via |
-|---------|-------------|------------|
-| `context-mcp` | Main MCP server — memory, search, CLI, file/git tools | npm |
-| `codegraph-mcp` | Python subprocess — AST graph, queries, community detection | uv / pip |
-
-Both are required for CodeGraph tools. Memory tools work with npm alone.
-
-### npm
-
 ```bash
-npm install -g context-mcp
+npm install -g context-mcp-server
 ```
 
-Or run without installing:
+That's it. One command installs everything — the MCP server, HTTP server, and `ctx` CLI.
+
+Then run from your project root:
 
 ```bash
-npx context-mcp@latest
+ctx install --all
 ```
+
+This writes MCP config + AI instruction files for every platform **and** automatically sets up the Python codegraph environment if [uv](https://docs.astral.sh/uv/) is installed.
+
+> **CodeGraph requires uv.** Install it first if you want graph features:
+> ```bash
+> curl -Ls https://astral.sh/uv/install.sh | sh   # macOS / Linux
+> winget install astral-sh.uv                      # Windows
+> ```
+> Memory tools work with npm alone — uv is only needed for `codegraph_build` and graph queries.
+
+Requires Node.js ≥ 18.
 
 Installs three commands:
 
@@ -64,36 +63,9 @@ Installs three commands:
 | `context-mcp-http` | HTTP MCP server with OAuth 2.0 (for web clients) |
 | `ctx` | Interactive CLI — browse, search, manage context |
 
-### uv (Python — CodeGraph)
-
-```bash
-# Install uv if you don't have it
-curl -Ls https://astral.sh/uv/install.sh | sh   # macOS / Linux
-winget install astral-sh.uv                      # Windows
-
-# Install codegraph-mcp
-uv tool install codegraph-mcp
-```
-
-Or run directly without installing:
-
-```bash
-uvx codegraph-mcp
-```
-
-Or with pip:
-
-```bash
-pip install codegraph-mcp
-```
-
-Requires Python ≥ 3.11 and Node.js ≥ 18.
-
 ---
 
 ## Platform Setup
-
-The easiest way to set up any platform is with `ctx install`:
 
 ```bash
 ctx install --claude      # Claude Code
@@ -102,10 +74,10 @@ ctx install --vscode      # VS Code Copilot
 ctx install --gemini      # Gemini CLI
 ctx install --codex       # Codex CLI
 ctx install --windsurf    # Windsurf
-ctx install --all         # all platforms at once
+ctx install --all         # all platforms + Python setup at once
 ```
 
-Run this from your project root. It writes the MCP config file and AI instruction file for each platform directly into your project.
+Run from your project root. Each command writes the MCP config file and AI instruction file for that platform, then checks for uv and sets up the Python codegraph environment.
 
 ---
 
@@ -122,7 +94,7 @@ Manual config — add to `.claude/mcp.json`:
   "mcpServers": {
     "context-mcp": {
       "command": "npx",
-      "args": ["-y", "context-mcp@latest"]
+      "args": ["-y", "context-mcp-server@latest"]
     }
   }
 }
@@ -143,7 +115,7 @@ Manual config — add to `.cursor/mcp.json`:
   "mcpServers": {
     "context-mcp": {
       "command": "npx",
-      "args": ["-y", "context-mcp@latest"]
+      "args": ["-y", "context-mcp-server@latest"]
     }
   }
 }
@@ -165,7 +137,7 @@ Manual config — add to `.vscode/mcp.json`:
     "context-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "context-mcp@latest"]
+      "args": ["-y", "context-mcp-server@latest"]
     }
   }
 }
@@ -186,7 +158,7 @@ Manual config — add to `.gemini/settings.json`:
   "mcpServers": {
     "context-mcp": {
       "command": "npx",
-      "args": ["-y", "context-mcp@latest"]
+      "args": ["-y", "context-mcp-server@latest"]
     }
   }
 }
@@ -206,7 +178,7 @@ Manual config — add to `.codex/config.toml`:
 [[mcp_servers]]
 name    = "context-mcp"
 command = "npx"
-args    = ["-y", "context-mcp@latest"]
+args    = ["-y", "context-mcp-server@latest"]
 ```
 
 ---
@@ -224,7 +196,7 @@ Manual config — add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "context-mcp": {
       "command": "npx",
-      "args": ["-y", "context-mcp@latest"]
+      "args": ["-y", "context-mcp-server@latest"]
     }
   }
 }
@@ -234,34 +206,32 @@ Manual config — add to `~/.codeium/windsurf/mcp_config.json`:
 
 ### Claude.ai / ChatGPT (HTTP mode)
 
-Web-based AI clients connect over HTTP with OAuth 2.0, not stdio. Use `ctx online` to start the HTTP server.
+Web-based clients connect over HTTP with OAuth 2.0. Use `ctx online` to start the HTTP server.
 
-**Step 1 — Start the HTTP server:**
+**Step 1 — Start the server:**
 
 ```bash
 ctx online
 ```
 
-This starts the server in the background, shows your OAuth credentials, and prints the endpoint URL. Run it again to see if it's already running — it won't start a second copy.
+Starts the server in the background, shows your OAuth credentials, and prints the endpoint URL. Safe to re-run — won't start a second copy.
 
 ```bash
-ctx online --restart   # force restart even if already running
+ctx online --restart   # force restart
 ctx online --port 3200 # use a different port
 ```
 
-Or start directly without the CLI:
+Or start directly:
 
 ```bash
 context-mcp-http --port 3100 --host localhost --access-git
 ```
 
-**Step 2 — Add as a remote MCP connector in Claude.ai:**
+**Step 2 — Add as a remote MCP connector:**
 
 1. Go to Claude.ai → Settings → Integrations → Add MCP Connector
 2. Enter your server URL (e.g. `http://localhost:3100`)
-3. When prompted for credentials, use the **Client ID** and **Client Secret** shown by `ctx online`
-
-The server auto-generates credentials on first run. Open `http://localhost:3100` in a browser to see a connection guide page with your current credentials.
+3. Use the **Client ID** and **Client Secret** from `~/.context-mcp/contextconfig.json`
 
 **View or edit config:**
 
@@ -269,7 +239,17 @@ The server auto-generates credentials on first run. Open `http://localhost:3100`
 ctx settings
 ```
 
-Shows all config values (port, host, client ID, secret) and lets you edit them interactively.
+---
+
+## Path Sandboxing (Security)
+
+File and git tools are sandboxed to your project root. Pass `rootPath` when calling `context.resume` to register it:
+
+```json
+{ "action": "resume", "project": "my-app", "rootPath": "/home/user/my-app" }
+```
+
+The root is stored permanently with the project. Any file or git operation outside that directory is rejected. This applies to all HTTP-connected clients (Claude.ai, ChatGPT) — they can only access files within the registered project root.
 
 ---
 
@@ -287,20 +267,24 @@ ctx summary [project]                # summarize recent entries
 
 # Delete
 ctx delete <id-prefix>               # delete one entry by ID prefix
-ctx delete project <name|id>         # delete all entries for a project (by name or UUID)
+ctx delete project <name|id>         # delete all entries for a project
 
 # Server
-ctx online                           # start HTTP server (idempotent — safe to re-run)
+ctx online                           # start HTTP server (idempotent)
 ctx online --restart                 # force stop + restart
 ctx online --port 3200               # use a different port
 ctx settings                         # view and edit config interactively
 
-# Tools
+# Setup
 ctx install --claude                 # write MCP config for Claude Code
 ctx install --cursor                 # write MCP config for Cursor
 ctx install --vscode                 # write MCP config for VS Code
 ctx install --gemini                 # write MCP config for Gemini CLI
-ctx install --all                    # install for all platforms at once
+ctx install --codex                  # write MCP config for Codex CLI
+ctx install --windsurf               # write MCP config for Windsurf
+ctx install --all                    # all platforms + Python setup
+
+# Tools
 ctx benchmark                        # real token savings report (memory + graph)
 ctx discuss [project]                # view discussions
 ```
@@ -347,44 +331,54 @@ Config lives at `~/.context-mcp/contextconfig.json` — auto-created on first ru
   "port": 3100,
   "host": "localhost",
   "access_git": false,
-  "public_url": null
+  "public_url": null,
+  "allowed_redirect_uris": ["https://claude.ai"],
+  "allowed_origins": []
 }
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `client_id` | `"context-mcp"` | OAuth client ID shown to web clients |
-| `client_secret` | auto-generated | OAuth secret — keep private |
-| `port` | `3100` | HTTP server port (overridable with `--port`) |
-| `host` | `"localhost"` | HTTP bind host (overridable with `--host`) |
-| `access_git` | `false` | Enable git tools (overridable with `--access-git`) |
-| `public_url` | `null` | Saved public URL shown in `ctx online` output |
+| `client_id` | `"context-mcp"` | OAuth client ID |
+| `client_secret` | auto-generated | OAuth signing secret — keep private |
+| `port` | `3100` | HTTP server port |
+| `host` | `"localhost"` | HTTP bind host |
+| `access_git` | `false` | Enable git tools for HTTP clients |
+| `public_url` | `null` | Public URL shown in `ctx online` output |
+| `allowed_redirect_uris` | `["https://claude.ai"]` | OAuth redirect URI whitelist |
+| `allowed_origins` | `[]` | Extra CORS origins beyond `claude.ai` and `localhost` |
 
 Edit any field interactively with `ctx settings`.
-
-The data directory itself is controlled by the `CONTEXT_MCP_DIR` env variable or `--data-dir` flag. Default: `~/.context-mcp/`.
 
 ---
 
 ## Features
 
 ### Memory
-- `context.resume` — one call loads recent entries, active discussions, and graph status
+- `context.resume` — loads recent entries, active discussions, and graph status. Pass `rootPath` to sandbox file/git tools to your project directory.
 - `context.save` — store decisions, bugs, notes, code snippets, architecture with type tags
 - `context.get` / `context.update` / `context.delete` — full CRUD
 - `search` — keyword-first, semantic fallback, searches all past context
 - `discussion` — threaded plans with steps, status tracking, cross-session continuity
 - Auto-deduplication on save
 - Auto-compact at 50 entries (oldest entries summarized into a digest)
-- Per-project isolation
+- Per-project isolation with stable UUIDs
+
+### File & Git Tools (HTTP mode)
+Available to web clients (Claude.ai, ChatGPT) only — local AI clients use their native IDE tools directly.
+
+- `read_file`, `write_file`, `patch_file`, `create_dir`, `list_dir`, `delete_file`
+- `git_status`, `git_diff`, `git_log`, `git_add`, `git_commit`, `git_push`, `git_pull`, `git_branch`, `git_stash`, `git_reset`, `git_show`
+
+All file and git operations are sandboxed to the registered project root. Enable git tools with `--access-git` or `access_git: true` in config.
 
 ### CodeGraph
-- `codegraph_build` — AST scan: functions, classes, imports, edges. No API, no cost, runs locally
-- `codegraph_extract` — returns changed files with their node lists for AI enrichment
+- `codegraph_build` — AST scan: functions, classes, imports, edges. Runs locally, no API cost.
+- `codegraph_extract` — returns changed files with node lists for AI enrichment
 - `codegraph_add_nodes` — stores AI-written descriptions in permanent semantic cache
 - `codegraph_query` — natural language structural question → NODE/EDGE subgraph with `token_budget` control
-- `codegraph_explain` — single node lookup: description, what it depends on, what uses it
-- `codegraph_path` — shortest path between two concepts in the graph
+- `codegraph_explain` — single node: description, dependencies, usages
+- `codegraph_path` — shortest path between two concepts
 - `codegraph_nodes` — list all nodes of a given type
 - `codegraph_report` — full graph analysis: god nodes, clusters, surprising connections
 
@@ -393,14 +387,14 @@ The data directory itself is controlled by the `CONTEXT_MCP_DIR` env variable or
 | AI | Config File | Instruction File |
 |----|------------|-----------------|
 | Claude Code | `.claude/mcp.json` | `CLAUDE.md` |
-| Claude VSCode | `.vscode/mcp.json` | `CLAUDE.md` |
+| VS Code Copilot | `.vscode/mcp.json` | `CLAUDE.md` |
 | Cursor | `.cursor/mcp.json` | `.cursor/rules/context-mcp.mdc` |
 | Gemini CLI | `.gemini/settings.json` | `GEMINI.md` |
 | Codex CLI | `.codex/config.toml` | `AGENTS.md` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | `.windsurf/rules/context-mcp.md` |
 | Claude.ai / ChatGPT | HTTP (`ctx online`) | — |
 
-> **The context store lives at `~/.context-mcp/` on your machine — not inside any tool, IDE, or session.** Any AI connecting to this server reads and writes the same store. A decision saved in Claude Code is visible in Cursor. A bug logged from Gemini CLI shows up when you resume in Codex.
+> The context store lives at `~/.context-mcp/` — not inside any tool, IDE, or session. A decision saved in Claude Code is visible in Cursor. A bug logged from Gemini CLI shows up when you resume in Codex.
 
 ---
 
@@ -426,9 +420,10 @@ context-mcp/
 │   ├── index.js           Stdio MCP server entrypoint
 │   ├── server.js          MCP server — registers all tools
 │   ├── db.js              JSON store — in-memory cache, debounced writes, project registry
+│   ├── guard.js           Path sandboxing — enforces project root on all file/git ops
 │   ├── search.js          Keyword + semantic search
 │   ├── summarizer.js      Auto-compact summarization
-│   ├── cli.js             Interactive CLI (ctx) — 256-color UI
+│   ├── cli.js             Interactive CLI (ctx)
 │   ├── http.js            HTTP server — OAuth 2.0 + Streamable HTTP transport
 │   ├── config.js          Config loader — contextconfig.json + keytar
 │   ├── vector.js          Embedding helpers
@@ -437,32 +432,30 @@ context-mcp/
 │       ├── discussion.js  Discussion tool (threaded plans + steps)
 │       ├── codegraph.js   CodeGraph tool — bridge to Python subprocess
 │       ├── search.js      Search tool
-│       ├── fileTools.js   File read/write helpers
-│       ├── gitTools.js    Git integration
+│       ├── fileTools.js   File read/write (HTTP mode, sandboxed to project root)
+│       ├── gitTools.js    Git integration (HTTP mode, sandboxed to project root)
 │       └── errorCheck.js  Error checking tool
-├── codegraph/             Python package (published separately as codegraph-mcp)
+├── codegraph/             Python package — AST extraction + graph queries
 │   ├── server.py          Dispatcher — reads JSON from stdin, routes to tools
 │   ├── scanner.py         File walker + classifier
 │   ├── cache.py           Two-layer cache (ast.json + semantic.json)
 │   ├── report.py          Graph report generator
 │   ├── extractors/
-│   │   ├── ast_extractor.py   AST node + edge extraction
-│   │   ├── doc_extractor.py   Markdown / text extraction
-│   │   ├── image_extractor.py Image metadata extraction
-│   │   └── audio_extractor.py Audio metadata extraction
+│   │   ├── ast_extractor.py
+│   │   ├── doc_extractor.py
+│   │   ├── image_extractor.py
+│   │   └── audio_extractor.py
 │   └── graph/
 │       ├── builder.py     NetworkX graph construction
 │       ├── query.py       Natural language → subgraph traversal
 │       └── clustering.py  Community detection
 └── ~/.context-mcp/        Data directory (outside repo, never committed)
-    ├── contexts.json      Context entries
-    ├── discussions.json   Discussions
-    ├── projects.json      Project registry with stable UUIDs
-    ├── graphs.json        Graph metadata
+    ├── contexts.json
+    ├── discussions.json
+    ├── projects.json      Project registry — includes rootPath per project
+    ├── graphs.json
     └── contextconfig.json OAuth config + server settings
 ```
-
-Data stored in `~/.context-mcp/` — separate from the project, never committed.
 
 ---
 

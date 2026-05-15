@@ -534,7 +534,7 @@ const PLATFORMS = {
     label: 'Claude Code',
     install(cwd) {
       const mcpJson = JSON.stringify({
-        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp@latest'] } },
+        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp-server@latest'] } },
       }, null, 2);
       _writeFile(join(cwd, '.claude', 'mcp.json'), mcpJson, '.claude/mcp.json');
       const md = _tpl('CLAUDE.md');
@@ -545,7 +545,7 @@ const PLATFORMS = {
     label: 'Cursor',
     install(cwd) {
       const mcpJson = JSON.stringify({
-        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp@latest'] } },
+        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp-server@latest'] } },
       }, null, 2);
       _writeFile(join(cwd, '.cursor', 'mcp.json'), mcpJson, '.cursor/mcp.json');
       const mdc = _tpl('cursor-rules.mdc');
@@ -556,7 +556,7 @@ const PLATFORMS = {
     label: 'VS Code Copilot',
     install(cwd) {
       const mcpJson = JSON.stringify({
-        servers: { 'context-mcp': { type: 'stdio', command: 'npx', args: ['-y', 'context-mcp@latest'] } },
+        servers: { 'context-mcp': { type: 'stdio', command: 'npx', args: ['-y', 'context-mcp-server@latest'] } },
       }, null, 2);
       _writeFile(join(cwd, '.vscode', 'mcp.json'), mcpJson, '.vscode/mcp.json');
       const md = _tpl('CLAUDE.md');
@@ -567,7 +567,7 @@ const PLATFORMS = {
     label: 'Gemini CLI',
     install(cwd) {
       const cfg = JSON.stringify({
-        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp@latest'] } },
+        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp-server@latest'] } },
       }, null, 2);
       _writeFile(join(cwd, '.gemini', 'settings.json'), cfg, '.gemini/settings.json');
       const md = _tpl('GEMINI.md');
@@ -577,7 +577,7 @@ const PLATFORMS = {
   codex: {
     label: 'Codex CLI',
     install(cwd) {
-      const toml = `[[mcp_servers]]\nname    = "context-mcp"\ncommand = "npx"\nargs    = ["-y", "context-mcp@latest"]\n`;
+      const toml = `[[mcp_servers]]\nname    = "context-mcp"\ncommand = "npx"\nargs    = ["-y", "context-mcp-server@latest"]\n`;
       _writeFile(join(cwd, '.codex', 'config.toml'), toml, '.codex/config.toml');
       const md = _tpl('AGENTS.md');
       if (md) _writeFile(join(cwd, 'AGENTS.md'), md, 'AGENTS.md');
@@ -594,7 +594,7 @@ const PLATFORMS = {
       let existing = {};
       try { existing = JSON.parse(readFileSync(globalCfgPath, 'utf8')); } catch {}
       existing.mcpServers = existing.mcpServers || {};
-      existing.mcpServers['context-mcp'] = { command: 'npx', args: ['-y', 'context-mcp@latest'] };
+      existing.mcpServers['context-mcp'] = { command: 'npx', args: ['-y', 'context-mcp-server@latest'] };
       _writeFile(globalCfgPath, JSON.stringify(existing, null, 2), '~/.codeium/windsurf/mcp_config.json');
     },
   },
@@ -636,6 +636,27 @@ function cmdInstall(args) {
 
   console.log(line());
   console.log(faint(`  ${keys.length} platform(s) installed into ${cwd.replace(/\\/g, '/')}`));
+  console.log('');
+
+  // ── Python / uv setup (codegraph) ─────────────────────────────────────────
+  console.log(`  ${bold(lblue('Python Codegraph'))}`);
+  const uvCheck = spawnSync('uv', ['--version'], { encoding: 'utf8' });
+  if (uvCheck.error || uvCheck.status !== 0) {
+    console.log(`  ${bad('✗')} uv not found — install it from ${accent('https://docs.astral.sh/uv/')} to enable codegraph`);
+    console.log('');
+    return;
+  }
+  console.log(`  ${ok('✓')} uv found: ${faint(uvCheck.stdout.trim())}`);
+
+  // Package root is one level up from src/
+  const __dirname_cli = dirname(fileURLToPath(import.meta.url));
+  const pkgRoot = join(__dirname_cli, '..');
+  const sync = spawnSync('uv', ['sync', '--no-dev'], { cwd: pkgRoot, encoding: 'utf8' });
+  if (sync.status !== 0) {
+    console.log(`  ${bad('✗')} uv sync failed:\n${faint((sync.stderr || sync.stdout || '').trim())}`);
+  } else {
+    console.log(`  ${ok('✓')} Python environment ready — codegraph enabled`);
+  }
   console.log('');
 }
 

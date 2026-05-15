@@ -43,7 +43,7 @@ context-mcp-http — Persistent AI memory MCP server (HTTP/OAuth transport)
 
 Usage:
   context-mcp-http [options]
-  npx context-mcp-http@latest [options]
+  npx context-mcp-server@latest [options]
 
 Options:
   --port <number>     HTTP listen port (default: 3100)
@@ -112,13 +112,7 @@ const TOKEN_TTL = 3600 * 1000;  // 1 hour
 const CODE_TTL = 5 * 60 * 1000; // 5 minutes
 
 function issueToken() {
-  // Issue a JWT signed with CLIENT_SECRET so we can validate without state
-  const jwt = issueJWT({ sub: CLIENT_ID, scope: 'mcp' }, CLIENT_SECRET, TOKEN_TTL / 1000);
-  // Also keep UUID fallback in the map for legacy clients
-  const uuid = randomUUID();
-  activeTokens.set(uuid, { expiresAt: Date.now() + TOKEN_TTL });
-  // Return JWT — callers that stored UUID tokens still work via the map
-  return jwt;
+  return issueJWT({ sub: CLIENT_ID, scope: 'mcp' }, CLIENT_SECRET, TOKEN_TTL / 1000);
 }
 
 function isValidToken(token) {
@@ -216,9 +210,18 @@ async function createMCPSession() {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function corsHeaders() {
+const ALLOWED_ORIGINS = [
+  'https://claude.ai',
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+  ...(config.allowed_origins || []),
+];
+
+function corsHeaders(reqOrigin) {
+  const origin = ALLOWED_ORIGINS.includes(reqOrigin) ? reqOrigin : ALLOWED_ORIGINS[0];
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin,
+    'Vary': 'Origin',
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id, Accept',
     'Access-Control-Expose-Headers': 'Mcp-Session-Id',
@@ -226,9 +229,20 @@ function corsHeaders() {
   };
 }
 
-function sendJSON(res, statusCode, data) {
-  res.writeHead(statusCode, { ...corsHeaders(), 'Content-Type': 'application/json' });
+function sendJSON(res, statusCode, data, reqOrigin) {
+  res.writeHead(statusCode, { ...corsHeaders(reqOrigin), 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
+}
+
+// Simple in-memory rate limiter: ip -> { count, resetAt }
+const _rateLimits = new Map();
+function checkRate(ip, limit, windowMs) {
+  const now = Date.now();
+  let e = _rateLimits.get(ip) ?? { count: 0, resetAt: now + windowMs };
+  if (now > e.resetAt) e = { count: 0, resetAt: now + windowMs };
+  e.count++;
+  _rateLimits.set(ip, e);
+  return e.count <= limit;
 }
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -252,20 +266,23 @@ async function readBody(req) {
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
 
+  const reqOrigin = req.headers['origin'] || '';
+  const clientIp  = req.socket?.remoteAddress || 'unknown';
+
   // CORS preflight
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, corsHeaders());
+    res.writeHead(204, corsHeaders(reqOrigin));
     res.end();
     return;
   }
 
   // Health check (public)
   if (url.pathname === '/health' && req.method === 'GET') {
-    sendJSON(res, 200, { status: 'ok', sessions: sessions.size });
+    sendJSON(res, 200, { status: 'ok', sessions: sessions.size }, reqOrigin);
     return;
   }
 
-  // ── OAuth 2.0 Authorization endpoint (auto-approves since we have no UI) ──
+  // ── OAuth 2.0 Authorization endpoint ──
   if (url.pathname === '/authorize' && req.method === 'GET') {
     const response_type = url.searchParams.get('response_type');
     const client_id = url.searchParams.get('client_id');
@@ -274,17 +291,24 @@ async function handleRequest(req, res) {
     const code_challenge = url.searchParams.get('code_challenge');
 
     if (response_type !== 'code') {
-      sendJSON(res, 400, { error: 'unsupported_response_type', error_description: 'Only response_type=code is supported' });
+      sendJSON(res, 400, { error: 'unsupported_response_type', error_description: 'Only response_type=code is supported' }, reqOrigin);
       return;
     }
 
     if (client_id !== CLIENT_ID) {
-      sendJSON(res, 401, { error: 'invalid_client' });
+      sendJSON(res, 401, { error: 'invalid_client' }, reqOrigin);
       return;
     }
 
     if (!redirect_uri) {
-      sendJSON(res, 400, { error: 'invalid_request', error_description: 'redirect_uri is required' });
+      sendJSON(res, 400, { error: 'invalid_request', error_description: 'redirect_uri is required' }, reqOrigin);
+      return;
+    }
+
+    // Validate redirect_uri against whitelist to prevent open redirect attacks
+    const allowedRedirectUris = config.allowed_redirect_uris ?? ['https://claude.ai'];
+    if (!allowedRedirectUris.some(u => redirect_uri.startsWith(u))) {
+      sendJSON(res, 400, { error: 'invalid_request', error_description: 'redirect_uri not allowed' }, reqOrigin);
       return;
     }
 
@@ -308,12 +332,16 @@ async function handleRequest(req, res) {
 
   // ── OAuth 2.0 token endpoint ──
   if ((url.pathname === '/oauth/token' || url.pathname === '/token') && req.method === 'POST') {
+    // Rate limit: 10 requests per minute per IP
+    if (!checkRate(clientIp, 10, 60_000)) {
+      sendJSON(res, 429, { error: 'rate_limit_exceeded', error_description: 'Too many token requests' }, reqOrigin);
+      return;
+    }
+
     const bodyStr = await readBody(req);
     let params;
 
     const ct = req.headers['content-type'] || '';
-    console.log('[OAuth] Token request received, Content-Type:', ct);
-    console.log('[OAuth] Body:', bodyStr);
 
     if (ct.includes('application/json')) {
       try { params = JSON.parse(bodyStr); } catch { params = {}; }
@@ -330,22 +358,19 @@ async function handleRequest(req, res) {
       const [u, p] = Buffer.from(b64, 'base64').toString().split(':');
       clientId = clientId || u;
       clientSecret = clientSecret || p;
-      console.log('[OAuth] Parsed Basic Auth:', clientId);
     }
 
     const { grant_type, code, code_verifier } = params;
-    console.log(`[OAuth] grant_type: ${grant_type}, code: ${code}, verifier: ${code_verifier}`);
 
     if (clientId !== CLIENT_ID || clientSecret !== CLIENT_SECRET) {
-      console.error('[OAuth] Validation failed: invalid client ID or secret');
-      sendJSON(res, 401, { error: 'invalid_client', error_description: 'Invalid client_id or client_secret' });
+      sendJSON(res, 401, { error: 'invalid_client', error_description: 'Invalid client_id or client_secret' }, reqOrigin);
       return;
     }
 
     if (grant_type === 'authorization_code') {
       const codeEntry = authCodes.get(code);
       if (!codeEntry || Date.now() > codeEntry.expiresAt) {
-        sendJSON(res, 400, { error: 'invalid_grant', error_description: 'Invalid or expired authorization code' });
+        sendJSON(res, 400, { error: 'invalid_grant', error_description: 'Invalid or expired authorization code' }, reqOrigin);
         return;
       }
 
@@ -353,14 +378,14 @@ async function handleRequest(req, res) {
         const hash = createHash('sha256').update(code_verifier).digest('base64')
           .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
         if (hash !== codeEntry.code_challenge) {
-          sendJSON(res, 400, { error: 'invalid_grant', error_description: 'PKCE verification failed' });
+          sendJSON(res, 400, { error: 'invalid_grant', error_description: 'PKCE verification failed' }, reqOrigin);
           return;
         }
       }
 
       authCodes.delete(code);
     } else if (grant_type !== 'client_credentials') {
-      sendJSON(res, 400, { error: 'unsupported_grant_type', error_description: 'Unsupported grant type' });
+      sendJSON(res, 400, { error: 'unsupported_grant_type', error_description: 'Unsupported grant type' }, reqOrigin);
       return;
     }
 
@@ -378,13 +403,13 @@ async function handleRequest(req, res) {
     const base = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host || `${HOST}:${PORT}`}`;
     sendJSON(res, 200, {
       issuer: base,
-      authorization_endpoint: `${base}/authorize`,           // RFC 8414: required for auth-code flow
+      authorization_endpoint: `${base}/authorize`,
       token_endpoint: `${base}/oauth/token`,
       grant_types_supported: ['client_credentials', 'authorization_code'],
-      response_types_supported: ['code'],                    // FIX: was 'token' (implicit); server uses auth-code flow
-      code_challenge_methods_supported: ['S256'],            // advertise PKCE support
-      token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'], // FIX: Basic auth is already accepted
-    });
+      response_types_supported: ['code'],
+      code_challenge_methods_supported: ['S256'],
+      token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+    }, reqOrigin);
     return;
   }
 
@@ -604,8 +629,7 @@ async function handleRequest(req, res) {
                 <span class="step-num">3</span>
                 <span class="step-title">Credentials</span>
                 <span class="step-content">
-                  Client ID: <code>${CLIENT_ID}</code><br>
-                  Client Secret: find it in <code>~/.context-mcp/contextconfig.json</code>
+                  Client ID &amp; Secret: see <code>~/.context-mcp/contextconfig.json</code>
                 </span>
               </div>
             </div>
@@ -624,7 +648,7 @@ async function handleRequest(req, res) {
 
   // Allow both /mcp and / to handle MCP requests (but not GET / — that serves the HTML guide)
   if (url.pathname !== '/mcp' && !(url.pathname === '/' && req.method !== 'GET')) {
-    sendJSON(res, 404, { error: `Not found: ${url.pathname}` });
+    sendJSON(res, 404, { error: `Not found: ${url.pathname}` }, reqOrigin);
     return;
   }
 
@@ -632,7 +656,7 @@ async function handleRequest(req, res) {
   const auth = req.headers['authorization'];
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token || !isValidToken(token)) {
-    sendJSON(res, 401, { error: 'invalid_token', error_description: 'Missing or expired token. POST /oauth/token first.' });
+    sendJSON(res, 401, { error: 'invalid_token', error_description: 'Missing or expired token. POST /oauth/token first.' }, reqOrigin);
     return;
   }
 
@@ -651,7 +675,7 @@ async function handleRequest(req, res) {
       }
 
       if (!sessionId || !sessions.has(sessionId)) {
-        sendJSON(res, 400, { error: 'Missing or invalid Mcp-Session-Id.' });
+        sendJSON(res, 400, { error: 'Missing or invalid Mcp-Session-Id.' }, reqOrigin);
         return;
       }
       const { transport } = sessions.get(sessionId);
@@ -659,7 +683,7 @@ async function handleRequest(req, res) {
 
     } else if (req.method === 'GET') {
       if (!sessionId || !sessions.has(sessionId)) {
-        sendJSON(res, 400, { error: 'Missing or invalid Mcp-Session-Id' });
+        sendJSON(res, 400, { error: 'Missing or invalid Mcp-Session-Id' }, reqOrigin);
         return;
       }
       const { transport } = sessions.get(sessionId);
@@ -671,15 +695,15 @@ async function handleRequest(req, res) {
         await transport.close();
         sessions.delete(sessionId);
       }
-      sendJSON(res, 200, { closed: true });
+      sendJSON(res, 200, { closed: true }, reqOrigin);
 
     } else {
-      sendJSON(res, 405, { error: 'Method not allowed' });
+      sendJSON(res, 405, { error: 'Method not allowed' }, reqOrigin);
     }
   } catch (err) {
     console.error('MCP HTTP error:', err.message);
     if (!res.headersSent) {
-      sendJSON(res, 500, { error: err.message });
+      sendJSON(res, 500, { error: err.message }, reqOrigin);
     }
   }
 }

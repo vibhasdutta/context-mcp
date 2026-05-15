@@ -1,25 +1,25 @@
 {
-  "name": "@vibhasdutta/context-mcp",
-  "version": "1.0.0",
+  "name": "context-mcp-server",
+  "version": "1.0.1",
   "description": "Persistent AI memory + codebase knowledge graph MCP server. Works across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Claude.ai, and ChatGPT.",
   "type": "module",
   "bin": {
-    "context-mcp": "./dist/index.js",
-    "context-mcp-http": "./dist/http.js",
-    "ctx": "./dist/cli.js"
+    "context-mcp": "./src/index.js",
+    "context-mcp-http": "./src/http.js",
+    "ctx": "./src/cli.js"
   },
   "scripts": {
     "mcp": "node src/index.js",
     "mcp-server": "node src/http.js",
     "cli": "node src/cli.js",
-    "build": "node build.mjs",
     "check": "node --check src/index.js && node --check src/server.js && node --check src/db.js && node --check src/vector.js && node --check src/summarizer.js && node --check src/search.js && node --check src/config.js && node --check src/cli.js && node --check src/http.js && node --check src/tools/context.js && node --check src/tools/search.js && node --check src/tools/discussion.js && node --check src/tools/errorCheck.js && node --check src/tools/fileTools.js && node --check src/tools/gitTools.js && node --check src/tools/codegraph.js && node --check src/hooks/autoLink.js && node --check src/hooks/autoContext.js",
     "check-mcp": "npm run check",
     "test": "node --test",
-    "prepublishOnly": "npm run check && npm run build"
+    "prepublishOnly": "npm run check"
   },
   "files": [
-    "dist/",
+    "src/",
+    "codegraph/",
     "README.md"
   ],
   "keywords": [
@@ -58,7 +58,5 @@
     "keytar": "^7.9.0",
     "ws": "^8.18.0"
   },
-  "devDependencies": {
-    "esbuild": "^0.28.0"
-  }
+  "devDependencies": {}
 }

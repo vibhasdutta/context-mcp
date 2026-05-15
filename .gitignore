@@ -23,6 +23,17 @@ contextconfig.json
 # ── codegraph build outputs ──────────────────────────────────────────────────
 codegraph-cache/
 
-# ── AI FIles ───────────────────────────────────────────────────────────────
+# ── Project-specific folders not needed in repo ──────────────────────────────
+docs/
+tests/
+scripts/
+
+# ── AI / IDE platform folders (user-specific, varies per machine) ────────────
 .claude/
+.cursor/
 .vscode/
+.idea/
+.gemini/
+.codex/
+.windsurf/
+

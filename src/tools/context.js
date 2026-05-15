@@ -1,8 +1,19 @@
+import { execFileSync } from 'node:child_process';
+import { guardPath } from '../guard.js';
 import {
   saveContext, updateContext, getContext, deleteContext,
   listProjects, findDuplicate, archiveExpired, linkContextToDiscussion,
   listDiscussions, listGraphs, countContext, shouldCompact, compactProject,
+  ensureProject, getProjectRoot,
 } from '../db.js';
+
+function detectGitRoot() {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: process.cwd(), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch { return null; }
+}
 import { summarizeEntries } from '../summarizer.js';
 import { fireAutoLink } from '../hooks/autoLink.js';
 
@@ -28,6 +39,7 @@ export const definition = {
       content:       { type: 'string' },
       title:         { type: 'string' },
       project:       { type: 'string' },
+      rootPath:      { type: 'string', description: 'Absolute path to the project root directory. Stored on first call and used to sandbox file/git tool access.' },
       type:          { type: 'string', enum: ['decision', 'note', 'code', 'bug', 'architecture', 'config', 'summary', 'error'] },
       status:        { type: 'string', enum: ['active', 'archived'] },
       tags:          { type: 'array', items: { type: 'string' } },
@@ -69,6 +81,13 @@ export async function handle(args, state) {
       // Set project on state so autoLink works for subsequent saves
       if (proj) state.sessionProject = proj;
 
+      // Store rootPath with project (first time only) and load it onto session state.
+      // Auto-detect from git if neither provided nor previously stored.
+      const storedRoot = proj ? getProjectRoot(proj) : null;
+      const resolvedRoot = args.rootPath || storedRoot || detectGitRoot() || null;
+      if (proj) ensureProject(proj, resolvedRoot || undefined);
+      state.projectRootPath = resolvedRoot;
+
       const entries       = getContext({ project: proj, limit: 15, compact: true })
         .filter(e => e.status !== 'archived');
       const discussions   = listDiscussions({ project: proj, status: 'active' });
@@ -97,6 +116,10 @@ export async function handle(args, state) {
         digest:             digest || undefined,
         stats:              { totalEntries, projects: listProjects().length },
         message: `Loaded ${totalEntries} entries for project "${proj || 'global'}".${discussions.length === 1 ? ` Auto-linked to discussion "${discussions[0].name}".` : ''}`,
+        rootPath: state.projectRootPath || undefined,
+        sandbox: state.projectRootPath
+          ? `All file and git operations are sandboxed to: ${state.projectRootPath} — do not use paths outside this root.`
+          : 'No project root configured — pass rootPath to restrict file/git access to a directory.',
         hint: graphStatus.built
           ? `Graph ready (${graphStatus.nodes} nodes). Use codegraph_query for structural questions.`
           : 'No graph built yet. Call codegraph_build on the project root to enable graph queries.',
@@ -106,6 +129,27 @@ export async function handle(args, state) {
     case 'save': {
       if (!args.content) throw new Error('content is required for save');
       if (!args.project && state.sessionProject) args = { ...args, project: state.sessionProject };
+      // Auto-detect and store project root if not yet configured
+      if (args.project) {
+        const existing = getProjectRoot(args.project);
+        if (!existing) {
+          const detected = state.projectRootPath || detectGitRoot();
+          if (detected) {
+            ensureProject(args.project, detected);
+            if (!state.projectRootPath) state.projectRootPath = detected;
+          }
+        }
+      }
+      // Validate file paths in files[] and codeRefs[] stay within project root
+      if (state.projectRootPath) {
+        if (Array.isArray(args.files)) {
+          args.files.forEach(f => { if (f.path) guardPath(f.path, state.projectRootPath); });
+        }
+        if (Array.isArray(args.codeRefs)) {
+          args.codeRefs.forEach(r => { if (r.file) guardPath(r.file, state.projectRootPath); });
+        }
+      }
+
       const dupe = findDuplicate(args.content, args.project);
       if (dupe) {
         const updated = updateContext({
