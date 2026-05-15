@@ -1,0 +1,28 @@
+# ── Node.js ───────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+*.log
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ── context-mcp runtime data ─────────────────────────────────────────────────
+# User memory lives in ~/.context-mcp — never in the repo
+contextconfig.json
+
+# ── codegraph build outputs ──────────────────────────────────────────────────
+codegraph-cache/
+
+# ── AI FIles ───────────────────────────────────────────────────────────────
+.claude/
+.vscode/

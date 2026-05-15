@@ -1,0 +1,16 @@
+src/
+build.mjs
+node_modules
+.env
+.env.local
+.git
+.github
+tests
+coverage
+*.log
+firebase-adminsdk.json
+codegraph/
+docs
+uv.lock
+pyproject.toml
+*.tgz

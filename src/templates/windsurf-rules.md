@@ -1,0 +1,35 @@
+# Context-MCP — Windsurf Usage Guide
+
+Persistent memory + codebase knowledge graph for Windsurf.
+Every conversation starts with `context.resume`. Every structural question uses `codegraph_query`. Files only read for bugs/logic.
+
+## 1. Start of Every Conversation (MANDATORY)
+
+Call `context` tool, `action: "resume"`, `project: "<project-name>"` before anything else.
+
+Returns: `recentEntries`, `activeDiscussions`, `codegraph { built, nodes, edges }`.
+
+- `codegraph.built: true` → use `codegraph_query` before reading files
+- `codegraph.built: false` → run `codegraph_build(path)` first
+
+## 2. Save Context
+
+| Situation | Action |
+|-----------|--------|
+| Decision made | `context.save` type: `"decision"` |
+| Bug found/fixed | `context.save` type: `"bug"` |
+| Architecture understood | `context.save` type: `"architecture"` |
+| Multi-session feature | `discussion.create` |
+
+## 3. CodeGraph
+
+Build once: `codegraph_build(path)` — then query forever.
+Use `codegraph_query` for structural questions. Read files for bugs/logic.
+
+## Rules
+
+1. `context.resume` first — every conversation
+2. Always pass `project`
+3. `search` before asking the user about past work
+4. `codegraph_query` before reading files
+5. Files only for bugs and logic
