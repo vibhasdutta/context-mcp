@@ -119,9 +119,11 @@ function printUsage() {
   cmd('ctx discuss [project]',      'show discussions');
   cmd('ctx benchmark',              'token savings report (memory + graph)');
   console.log('');
+  cmd('ctx install --initial',          'install / update Node.js + Python (codegraph) deps');
   cmd('ctx install --<platform>',      'write MCP config + instruction file for an AI platform');
   cmd('ctx install --all',             'install for all platforms at once');
   cmd('ctx online [--port N]',         'start HTTP server + show credentials for Claude.ai / ChatGPT');
+  cmd('ctx online --close',            'stop the running HTTP server');
   cmd('ctx settings',                  'view and edit config (port, host, client id/secret)');
   console.log('');
   cmd('ctx help',                      'show this screen');
@@ -586,10 +588,8 @@ const PLATFORMS = {
   windsurf: {
     label: 'Windsurf',
     install(cwd) {
-      // Local rule file
       const rules = _tpl('windsurf-rules.md');
       if (rules) _writeFile(join(cwd, '.windsurf', 'rules', 'context-mcp.md'), rules, '.windsurf/rules/context-mcp.md');
-      // Global Windsurf config
       const globalCfgPath = join(homedir(), '.codeium', 'windsurf', 'mcp_config.json');
       let existing = {};
       try { existing = JSON.parse(readFileSync(globalCfgPath, 'utf8')); } catch {}
@@ -602,12 +602,57 @@ const PLATFORMS = {
 
 function cmdInstall(args) {
   const flags = new Set(args.map(a => a.replace(/^--/, '')));
-  const all   = flags.has('all');
+  const all     = flags.has('all');
+  const initial = flags.has('initial');
   const keys  = all ? Object.keys(PLATFORMS) : Object.keys(PLATFORMS).filter(k => flags.has(k));
+
+  if (initial) {
+    printSection('Install', 'install / update');
+    console.log('');
+
+    const __dirname_init = dirname(fileURLToPath(import.meta.url));
+    const pkgRootInit = join(__dirname_init, '..');
+
+    // Node.js packages
+    console.log(`  ${bold(lblue('Node.js packages'))}`);
+    const npmInstall = spawnSync('npm', ['install', '--omit=dev'], {
+      cwd: pkgRootInit, encoding: 'utf8', shell: true,
+    });
+    if (npmInstall.status !== 0) {
+      console.log(`  ${bad('✗')} npm install failed:\n${faint((npmInstall.stderr || npmInstall.stdout || '').trim())}`);
+    } else {
+      console.log(`  ${ok('✓')} Node.js dependencies installed`);
+    }
+    console.log('');
+
+    // Python / uv (codegraph)
+    console.log(`  ${bold(lblue('Python Codegraph'))}`);
+    const uvCheck2 = spawnSync('uv', ['--version'], { encoding: 'utf8', shell: true });
+    if (uvCheck2.error || uvCheck2.status !== 0) {
+      console.log(`  ${bad('✗')} uv not found — install from ${accent('https://docs.astral.sh/uv/')} to enable codegraph`);
+    } else {
+      console.log(`  ${ok('✓')} uv found: ${faint(uvCheck2.stdout.trim())}`);
+      // On Windows, an existing .venv contains a lib64 junction that uv can't remove — wipe it first
+      if (process.platform === 'win32') {
+        const venvPath = join(pkgRootInit, '.venv');
+        spawnSync('cmd', ['/c', 'rmdir', '/s', '/q', venvPath], { encoding: 'utf8' });
+      }
+      const sync2 = spawnSync('uv', ['sync', '--no-dev'], { cwd: pkgRootInit, encoding: 'utf8', shell: true });
+      if (sync2.status !== 0) {
+        console.log(`  ${bad('✗')} uv sync failed:\n${faint((sync2.stderr || sync2.stdout || '').trim())}`);
+      } else {
+        console.log(`  ${ok('✓')} Python environment ready — codegraph enabled`);
+      }
+    }
+    console.log('');
+    return;
+  }
 
   if (!keys.length) {
     printSection('Install');
-    console.log(`  ${muted('Usage:')}  ctx install ${faint('[--claude] [--cursor] [--vscode] [--gemini] [--codex] [--windsurf] [--all]')}`);
+    console.log(`  ${muted('Usage:')}  ctx install ${faint('[--initial] [--claude] [--cursor] [--vscode] [--gemini] [--codex] [--windsurf] [--all]')}`);
+    console.log('');
+    console.log(`  ${accent('--initial      ')}  ${faint('Install / update Node.js + Python (codegraph) deps')}`);
     console.log('');
     console.log(`  Writes MCP config file + AI instruction file for each selected platform.`);
     console.log(`  Files are written into the ${accent('current directory')} (your project root).`);
@@ -700,6 +745,7 @@ function cmdOnline(args) {
   const host    = hostIdx !== -1 && args[hostIdx + 1] ? args[hostIdx + 1] : null;
   const git     = args.includes('--access-git');
   const restart = args.includes('--restart');
+  const close   = args.includes('--close');
 
   let cfg;
   try { cfg = getConfig(); } catch { cfg = { client_id: 'context-mcp', client_secret: '(unavailable)', port: 3100, host: 'localhost' }; }
@@ -709,6 +755,21 @@ function cmdOnline(args) {
 
   printSection('Online', `HTTP MCP server → Claude.ai / ChatGPT`);
   console.log('');
+
+  if (close) {
+    const existing2 = _checkExistingHttpServer(resolvedPort);
+    if (existing2.status === 'running') {
+      if (existing2.pid) {
+        try { process.kill(existing2.pid); } catch {}
+      }
+      try { unlinkSync(_httpPidFile(resolvedPort)); } catch {}
+      const pidStr = existing2.pid ? `pid ${existing2.pid}  ·  ` : '';
+      console.log(`  ${ok('✓')} ${bold('server stopped')}  ${faint(pidStr + 'port ' + resolvedPort)}\n`);
+    } else {
+      console.log(`  ${warn('–')} no server running on port ${resolvedPort}\n`);
+    }
+    return;
+  }
 
   // Check if a server is already running on this port
   const existing = _checkExistingHttpServer(resolvedPort);
