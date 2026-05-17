@@ -7,12 +7,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .cache import file_hash, get_cached_nodes, set_cached_nodes, remove_deleted, load_cache, save_cache
-from .config import (
-    DEFAULT_IGNORE, MAX_FILE_BYTES,
-    CODE_EXTENSIONS, SQL_EXTENSIONS, CONFIG_EXTENSIONS,
-    DOC_EXTENSIONS, PDF_EXTENSIONS, IMAGE_EXTENSIONS,
-    AUDIO_EXTENSIONS, VIDEO_EXTENSIONS,
-)
+from .config import DEFAULT_IGNORE, MAX_FILE_BYTES, SKIP_FILENAMES, SKIP_EXTENSIONS, classify_file
 
 
 def _should_ignore(name: str, ignore: set) -> bool:
@@ -26,6 +21,9 @@ def walk_files(root: str, extra_ignore: set | None = None) -> Iterator[str]:
         # Prune ignored dirs in-place so os.walk doesn't descend
         dirnames[:] = [d for d in dirnames if d not in ignore and not d.startswith(".")]
         for fname in filenames:
+            ext = Path(fname).suffix.lower()
+            if fname in SKIP_FILENAMES or ext in SKIP_EXTENSIONS:
+                continue
             abs_path = os.path.join(dirpath, fname)
             try:
                 if os.path.getsize(abs_path) > MAX_FILE_BYTES:
@@ -33,20 +31,6 @@ def walk_files(root: str, extra_ignore: set | None = None) -> Iterator[str]:
             except OSError:
                 continue
             yield abs_path
-
-
-def classify_file(path: str) -> str:
-    """Return extraction category for a file."""
-    ext = Path(path).suffix.lower()
-    if ext in CODE_EXTENSIONS:    return "code"
-    if ext in SQL_EXTENSIONS:     return "sql"
-    if ext in CONFIG_EXTENSIONS:  return "config"
-    if ext in DOC_EXTENSIONS:     return "doc"
-    if ext in PDF_EXTENSIONS:     return "pdf"
-    if ext in IMAGE_EXTENSIONS:   return "image"
-    if ext in AUDIO_EXTENSIONS:   return "audio"
-    if ext in VIDEO_EXTENSIONS:   return "video"
-    return "unknown"
 
 
 def scan(project_root: str, extra_ignore: set | None = None) -> dict:
@@ -72,7 +56,7 @@ def scan(project_root: str, extra_ignore: set | None = None) -> dict:
         rel_path = os.path.relpath(abs_path, root).replace("\\", "/")
         existing_rel.add(rel_path)
         category = classify_file(abs_path)
-        if category == "unknown":
+        if category in ("unknown", "skip"):
             continue
         h = file_hash(abs_path)
         nodes = get_cached_nodes(cache, rel_path, h)

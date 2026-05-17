@@ -4,6 +4,8 @@ Persistent memory and codebase knowledge graph for AI coding assistants — deli
 
 One shared context store. Works across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Claude.ai, and ChatGPT. Save context from one AI, pick it up in another. Your memory follows the project, not the tool.
 
+**6 AI platforms** · **6 IDEs** · **16 programming languages** (Python, JS, TS, Go, Rust, Java, Kotlin, C, C++, C#, Ruby, PHP, Swift, Lua, and more) · tree-sitter AST parsing with regex fallback
+
 ---
 
 ## The Problem
@@ -24,9 +26,6 @@ You fix a bug with Claude Code, then open Cursor and it knows nothing about it. 
 
 **3. Structural understanding costs too many tokens.**
 Reading 20 files to answer "what calls this function?" is wasteful. context-mcp builds a knowledge graph of your codebase once, then answers structural questions in ~500 tokens instead of ~50,000.
-
-**4. Repeated enrichment is expensive.**
-AI-written descriptions of your code nodes are computed once and stored permanently. They survive file changes, rebuilds, and new conversations — never paid for twice.
 
 ---
 
@@ -373,11 +372,9 @@ Available to web clients (Claude.ai, ChatGPT) only — local AI clients use thei
 All file and git operations are sandboxed to the registered project root. Enable git tools with `--access-git` or `access_git: true` in config.
 
 ### CodeGraph
-- `codegraph_build` — AST scan: functions, classes, imports, edges. Runs locally, no API cost.
-- `codegraph_extract` — returns changed files with node lists for AI enrichment
-- `codegraph_add_nodes` — stores AI-written descriptions in permanent semantic cache
-- `codegraph_query` — natural language structural question → NODE/EDGE subgraph with `token_budget` control
-- `codegraph_explain` — single node: description, dependencies, usages
+- `codegraph_build` — AST scan using tree-sitter: functions, classes, imports, edges. Runs locally, no API cost.
+- `codegraph_query` — fetch any details about the codebase using natural language: find functions, classes, files, dependencies, callers
+- `codegraph_explain` — single node: type, file location, all direct connections (depends_on, used_by)
 - `codegraph_path` — shortest path between two concepts
 - `codegraph_nodes` — list all nodes of a given type
 - `codegraph_report` — full graph analysis: god nodes, clusters, surprising connections
@@ -436,15 +433,14 @@ context-mcp/
 │       ├── gitTools.js    Git integration (HTTP mode, sandboxed to project root)
 │       └── errorCheck.js  Error checking tool
 ├── codegraph/             Python package — AST extraction + graph queries
-│   ├── server.py          Dispatcher — reads JSON from stdin, routes to tools
-│   ├── scanner.py         File walker + classifier
-│   ├── cache.py           Two-layer cache (ast.json + semantic.json)
+│   ├── server.py          MCP server — tool definitions + dispatch
+│   ├── scanner.py         File walker + classifier (SKIP/BUILD/CODE/CONFIG/DOC/MEDIA)
+│   ├── config.py          File type taxonomy
+│   ├── cache.py           AST cache (hash-based, incremental)
 │   ├── report.py          Graph report generator
 │   ├── extractors/
-│   │   ├── ast_extractor.py
-│   │   ├── doc_extractor.py
-│   │   ├── image_extractor.py
-│   │   └── audio_extractor.py
+│   │   ├── ast_extractor.py    Tree-sitter AST (16 languages) + regex fallback
+│   │   └── build_extractor.py  Single-node extraction for build files
 │   └── graph/
 │       ├── builder.py     NetworkX graph construction
 │       ├── query.py       Natural language → subgraph traversal
@@ -453,7 +449,7 @@ context-mcp/
     ├── contexts.json
     ├── discussions.json
     ├── projects.json      Project registry — includes rootPath per project
-    ├── graphs.json
+    ├── graphs.json        Knowledge graph (nodes, edges, communities)
     └── contextconfig.json OAuth config + server settings
 ```
 

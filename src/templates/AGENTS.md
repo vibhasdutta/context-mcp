@@ -1,7 +1,7 @@
 # Context-MCP — Codex CLI Usage Guide
 
 Persistent memory + codebase knowledge graph.
-Every conversation starts with `context.resume`. Every structural question uses `codegraph_query`. Files only read for bugs/logic.
+Every conversation starts with `context.resume`. Every codebase question uses `codegraph_query`. Files only read for bugs/logic.
 
 ---
 
@@ -37,21 +37,15 @@ Always pass `project`. Auto-compact fires at >50 entries.
 
 ## 3. CodeGraph Pipeline
 
-### Step 1 — Build (once, free)
+### Step 1 — Build (once, fast, local)
 ```
 codegraph_build(path)  →  AST graph: functions, classes, imports, edges
 ```
 
-### Step 2 — Enrich (one-time per file)
+### Step 2 — Query (free, instant)
 ```
-codegraph_extract(path)           →  file content + node list
-codegraph_add_nodes(path, nodes)  →  semantic descriptions (permanent cache)
-```
-
-### Step 3 — Query (free, instant)
-```
-codegraph_query(path, question)   →  NODE/EDGE subgraph (token_budget default 2000)
-codegraph_explain(path, node)     →  single node + neighbors
+codegraph_query(path, question)   →  fetch any details about the codebase
+codegraph_explain(path, node)     →  single node: type, file, connections
 codegraph_path(path, from, to)    →  shortest path
 codegraph_nodes(path, type)       →  list nodes by type
 codegraph_report(path)            →  full graph analysis
@@ -61,8 +55,8 @@ codegraph_report(path)            →  full graph analysis
 
 ## 4. Graph vs File
 
-**Graph** — structural questions: dependencies, callers, imports.
-**File** — bugs, logic, tracing behavior.
+**Graph** — use for any question about what exists: finding functions, classes, files, dependencies, callers, imports, paths between concepts.
+**File** — bugs, logic, tracing unexpected behavior.
 
 ---
 
@@ -71,6 +65,5 @@ codegraph_report(path)            →  full graph analysis
 1. **`context.resume` first** — before any tool or response
 2. **Always pass `project`**
 3. **`search` before asking** — if user references past work
-4. **`codegraph_query` before reading files**
+4. **`codegraph_query` before reading files** — graph is faster and cheaper
 5. **Read files for bugs/logic only**
-6. **Enrich once** — descriptions persist forever

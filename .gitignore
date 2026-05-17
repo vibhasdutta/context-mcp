@@ -37,3 +37,9 @@ scripts/
 .codex/
 .windsurf/
 
+# ── Installed template files (written by ctx install, user-specific) ──────────
+# Source templates live in src/templates/ — these are installed copies
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+
