@@ -637,7 +637,7 @@ function cmdInstall(args) {
         const venvPath = join(pkgRootInit, '.venv');
         spawnSync('cmd', ['/c', 'rmdir', '/s', '/q', venvPath], { encoding: 'utf8' });
       }
-      const sync2 = spawnSync('uv', ['sync', '--no-dev'], { cwd: pkgRootInit, encoding: 'utf8', shell: true });
+      const sync2 = spawnSync('uv', ['--directory', pkgRootInit, 'sync', '--no-dev'], { encoding: 'utf8' });
       if (sync2.status !== 0) {
         console.log(`  ${bad('✗')} uv sync failed:\n${faint((sync2.stderr || sync2.stdout || '').trim())}`);
       } else {
@@ -696,7 +696,7 @@ function cmdInstall(args) {
   // Package root is one level up from src/
   const __dirname_cli = dirname(fileURLToPath(import.meta.url));
   const pkgRoot = join(__dirname_cli, '..');
-  const sync = spawnSync('uv', ['sync', '--no-dev'], { cwd: pkgRoot, encoding: 'utf8' });
+  const sync = spawnSync('uv', ['--directory', pkgRoot, 'sync', '--no-dev'], { encoding: 'utf8' });
   if (sync.status !== 0) {
     console.log(`  ${bad('✗')} uv sync failed:\n${faint((sync.stderr || sync.stdout || '').trim())}`);
   } else {
