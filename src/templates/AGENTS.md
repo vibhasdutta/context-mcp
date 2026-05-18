@@ -20,22 +20,40 @@ Then:
 
 ---
 
-## 2. During the Conversation
+## 2. When to Auto-Save Context
 
-| Situation | Action |
-|-----------|--------|
-| Decision made | `context.save` type: `"decision"` |
-| Bug found/fixed | `context.save` type: `"bug"` |
-| Architecture understood | `context.save` type: `"architecture"` |
-| User says "save/remember this" | `context.save` immediately |
-| Feature spans sessions | `discussion.save` status: `"active"` |
-| Need past info | `search` before asking user |
+**After graph build or rebuild** — every time `codegraph_build` completes:
+```
+context.save  type: "architecture"  title: "ContextGraph built — <project>"
+content: "nodes: X | edges: Y | communities: Z"
+```
 
-Always pass `project`. Auto-compact fires at >50 entries.
+**User explicitly asks** — "save this", "remember this", "note that" → save immediately.
+
+**During plan / implementation / discussion / research** — save only when genuinely valuable:
+
+| What happened | Type |
+|--------------|------|
+| Approach / library / pattern decided | `decision` |
+| Bug found (root cause known) or fixed | `bug` |
+| System structure understood | `architecture` |
+| Gotcha, constraint, non-obvious behavior | `note` |
+| Config / env var / secret key discovered | `config` |
+| External API or service integration learned | `note` |
+| Performance insight (why something is slow/fast) | `note` |
+| How to run tests / test pattern discovered | `note` |
+| Deploy / release step discovered | `note` |
+| Milestone / feature / task completed | `note` |
+
+Do NOT save: routine reads, search results, temporary debugging dead-ends.
+Feature spans sessions → `discussion.save` status: `"active"`.
+Need past info → `search` before asking. Always pass `project`.
 
 ---
 
-## 3. CodeGraph Pipeline
+## 3. ContextGraph Pipeline
+
+> The knowledge graph is also called **ContextGraph**. The MCP tools use the `codegraph_*` prefix — both names refer to the same thing.
 
 ### Step 1 — Build (once, fast, local)
 ```

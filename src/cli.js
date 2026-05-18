@@ -106,27 +106,45 @@ function printSection(title, meta = '') {
 
 function printUsage() {
   printBanner();
-  printSection('Commands');
+
+  // Terminal commands (ctx ...)
+  printSection('Terminal commands', 'run from your shell');
   const cmd = (c, desc) => console.log(`  ${accent(c.padEnd(40))} ${faint(desc)}`);
-  cmd('ctx',                        'open interactive mode');
-  cmd('ctx list [project]',         'list entries + discussions + graphs');
-  cmd('ctx search <query>',         'keyword → semantic fallback search');
-  cmd('ctx add',                    'add entry interactively');
-  cmd('ctx delete <id-prefix>',     'delete one entry');
-  cmd('ctx delete project <name|id>', 'delete all entries for a project (by name or id)');
-  cmd('ctx summary [project]',      'summarize recent entries');
-  cmd('ctx projects',               'show all projects + graphs');
-  cmd('ctx discuss [project]',      'show discussions');
-  cmd('ctx benchmark',              'token savings report (memory + graph)');
+  cmd('ctx',                           'open interactive mode');
+  cmd('ctx list [project]',            'list entries + discussions + graphs');
+  cmd('ctx search <query>',            'keyword → semantic fallback search');
+  cmd('ctx add',                       'add entry interactively');
+  cmd('ctx delete <id-prefix>',        'delete one entry');
+  cmd('ctx delete project <name|id>',  'delete all entries for a project');
+  cmd('ctx summary [project]',         'summarize recent entries');
+  cmd('ctx projects',                  'show all projects + graphs');
+  cmd('ctx discuss [project]',         'show discussions');
+  cmd('ctx benchmark',                 'token savings report (memory + graph)');
   console.log('');
-  cmd('ctx install --initial',          'install / update Node.js + Python (codegraph) deps');
-  cmd('ctx install --<platform>',      'write MCP config + instruction file for an AI platform');
+  cmd('ctx install --initial',         'install / update Node.js + Python (codegraph) deps');
+  cmd('ctx install --<platform>',      'write MCP config + skill/rules for an AI platform');
   cmd('ctx install --all',             'install for all platforms at once');
-  cmd('ctx online [--port N]',         'start HTTP server + show credentials for Claude.ai / ChatGPT');
+  cmd('ctx online [--port N]',         'start HTTP server for Claude.ai / ChatGPT');
   cmd('ctx online --close',            'stop the running HTTP server');
   cmd('ctx settings',                  'view and edit config (port, host, client id/secret)');
-  console.log('');
+  cmd('ctx update',                    'check for and apply latest version');
   cmd('ctx help',                      'show this screen');
+  console.log('');
+
+  // Interactive mode commands (no ctx prefix)
+  printSection('Interactive mode', 'type these inside  ctx  (no "ctx" prefix)');
+  const icmd = (c, desc) => console.log(`  ${accent(c.padEnd(40))} ${faint(desc)}`);
+  icmd('list [project]',               'list entries');
+  icmd('search <query>',               'search context');
+  icmd('add',                          'add entry');
+  icmd('projects',                     'show all projects');
+  icmd('discuss [project]',            'show discussions');
+  icmd('summary [project]',            'summarize recent entries');
+  icmd('benchmark',                    'token savings report');
+  icmd('install --<platform>',         'install for a platform');
+  icmd('settings',                     'edit config');
+  icmd('clear',                        'clear screen');
+  icmd('exit / quit / q',              'exit interactive mode');
   console.log('');
 }
 function clearScreen() {
@@ -531,65 +549,163 @@ function _writeFile(filePath, content, label) {
   console.log(`  ${ok('✓')} ${label.padEnd(28)} ${faint(filePath.replace(/\\/g, '/'))}`);
 }
 
+// Entries ctx install writes into project roots — add to user's global gitignore if one exists
+const _GLOBAL_GITIGNORE_ENTRIES = [
+  // Installed instruction files
+  'CLAUDE.md',
+  'GEMINI.md',
+  'AGENTS.md',
+  // AI/IDE platform config folders (context-mcp specific — safe to ignore globally)
+  '.claude/',
+  '.cursor/',
+  '.vscode/',
+  '.gemini/',
+  '.codex/',
+  '.windsurf/',
+  // Build outputs and session artifacts
+  'codegraph-cache/',
+  '.mcp.json',
+];
+
+function _updateGlobalGitignore() {
+  // Resolve global gitignore path: git config > ~/.gitignore_global > ~/.gitignore
+  let giPath = null;
+  const gitCfg = spawnSync('git', ['config', '--global', 'core.excludesFile'], { encoding: 'utf8' });
+  if (gitCfg.status === 0 && gitCfg.stdout.trim()) {
+    const resolved = gitCfg.stdout.trim().replace(/^~/, homedir());
+    if (existsSync(resolved)) giPath = resolved;
+  }
+  if (!giPath) {
+    for (const candidate of [join(homedir(), '.gitignore_global'), join(homedir(), '.gitignore')]) {
+      if (existsSync(candidate)) { giPath = candidate; break; }
+    }
+  }
+  if (!giPath) return; // no global gitignore — skip silently
+
+  const existing = readFileSync(giPath, 'utf8');
+  const lines = existing.split(/\r?\n/);
+  const missing = _GLOBAL_GITIGNORE_ENTRIES.filter(e => !lines.includes(e));
+  if (!missing.length) return;
+
+  const block = '\n# context-mcp — written by ctx install\n' + missing.join('\n') + '\n';
+  writeFileSync(giPath, existing.trimEnd() + block, 'utf8');
+  console.log(`  ${ok('✓')} ${'global gitignore'.padEnd(28)} ${faint(giPath.replace(/\\/g, '/'))}`);
+  for (const e of missing) console.log(`      ${faint('+ ' + e)}`);
+}
+
+function _writeCommands(baseDir) {
+  const cmdsDir = join(TPLS, 'commands');
+  const destDir = join(baseDir, '.claude', 'commands');
+  for (const [name, label] of [
+    ['context-resume.md', '/context-resume'],
+    ['graph-build.md',    '/graph-build'],
+    ['save-context.md',   '/save-context'],
+  ]) {
+    const src = join(cmdsDir, name);
+    if (existsSync(src)) {
+      _writeFile(join(destDir, name), readFileSync(src, 'utf8'), label);
+    }
+  }
+}
+
+const MCP_SERVER_CMD = { command: 'npx', args: ['-y', 'context-mcp-server@latest'] };
+
 const PLATFORMS = {
   claude: {
     label: 'Claude Code',
-    install(cwd) {
-      const mcpJson = JSON.stringify({
-        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp-server@latest'] } },
-      }, null, 2);
-      _writeFile(join(cwd, '.claude', 'mcp.json'), mcpJson, '.claude/mcp.json');
-      const md = _tpl('CLAUDE.md');
-      if (md) _writeFile(join(cwd, 'CLAUDE.md'), md, 'CLAUDE.md');
+    restartNote: 'Type /context-resume in Claude Code to start using context-mcp.',
+    install(dir, scope) {
+      // Install as a skill (global, works across all projects) instead of a flat CLAUDE.md
+      const skillSrc = join(TPLS, 'skills', 'SKILL.md');
+      const skillDest = join(homedir(), '.claude', 'skills', 'context-mcp', 'SKILL.md');
+      if (existsSync(skillSrc)) {
+        _writeFile(skillDest, readFileSync(skillSrc, 'utf8'), '~/.claude/skills/context-mcp/');
+      }
+      // Slash commands are always user-global (not project-scoped)
+      _writeCommands(homedir());
+      // Register via claude CLI so the server is trusted immediately (no manual trust prompt)
+      const scopeFlag = scope === 'global' ? 'user' : 'project';
+      const reg = spawnSync(
+        'claude', ['mcp', 'add', '--scope', scopeFlag, 'context-mcp', '--', 'npx', '-y', 'context-mcp-server@latest'],
+        { encoding: 'utf8', shell: true },
+      );
+      if (reg.status === 0) {
+        console.log(`  ${ok('✓')} ${'registered via claude mcp add'.padEnd(28)} ${faint('scope: ' + scopeFlag)}`);
+      } else {
+        console.log(`  ${faint('ℹ')} claude CLI not found — open Claude Code and trust context-mcp when prompted`);
+      }
     },
   },
   cursor: {
     label: 'Cursor',
-    install(cwd) {
-      const mcpJson = JSON.stringify({
-        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp-server@latest'] } },
-      }, null, 2);
-      _writeFile(join(cwd, '.cursor', 'mcp.json'), mcpJson, '.cursor/mcp.json');
-      const mdc = _tpl('cursor-rules.mdc');
-      if (mdc) _writeFile(join(cwd, '.cursor', 'rules', 'context-mcp.mdc'), mdc, '.cursor/rules/context-mcp.mdc');
+    restartNote: 'Restart Cursor to load the new MCP server.',
+    install(dir, scope) {
+      const mcpJson = JSON.stringify({ mcpServers: { 'context-mcp': MCP_SERVER_CMD } }, null, 2);
+      _writeFile(join(dir, '.cursor', 'mcp.json'), mcpJson, '.cursor/mcp.json');
+      if (scope === 'project') {
+        const mdc = _tpl('cursor-rules.mdc');
+        if (mdc) _writeFile(join(dir, '.cursor', 'rules', 'context-mcp.mdc'), mdc, '.cursor/rules/context-mcp.mdc');
+      }
+      // Try to enable via cursor CLI (enable/disable only — no add command)
+      const reg = spawnSync(
+        'cursor', ['agent', 'mcp', 'enable', 'context-mcp'],
+        { encoding: 'utf8', shell: true },
+      );
+      if (reg.status === 0) {
+        console.log(`  ${ok('✓')} ${'enabled via cursor agent mcp'.padEnd(28)}`);
+      }
     },
   },
   vscode: {
     label: 'VS Code Copilot',
-    install(cwd) {
+    restartNote: 'Reload VS Code window (Ctrl+Shift+P → "Reload Window").',
+    install(dir) {
       const mcpJson = JSON.stringify({
-        servers: { 'context-mcp': { type: 'stdio', command: 'npx', args: ['-y', 'context-mcp-server@latest'] } },
+        servers: { 'context-mcp': { type: 'stdio', ...MCP_SERVER_CMD } },
       }, null, 2);
-      _writeFile(join(cwd, '.vscode', 'mcp.json'), mcpJson, '.vscode/mcp.json');
-      const md = _tpl('CLAUDE.md');
-      if (md) _writeFile(join(cwd, 'CLAUDE.md'), md, 'CLAUDE.md');
+      _writeFile(join(dir, '.vscode', 'mcp.json'), mcpJson, '.vscode/mcp.json');
     },
   },
   gemini: {
     label: 'Gemini CLI',
-    install(cwd) {
-      const cfg = JSON.stringify({
-        mcpServers: { 'context-mcp': { command: 'npx', args: ['-y', 'context-mcp-server@latest'] } },
-      }, null, 2);
-      _writeFile(join(cwd, '.gemini', 'settings.json'), cfg, '.gemini/settings.json');
-      const md = _tpl('GEMINI.md');
-      if (md) _writeFile(join(cwd, 'GEMINI.md'), md, 'GEMINI.md');
+    restartNote: 'Restart your Gemini CLI session.',
+    install(dir, scope) {
+      const cfg = JSON.stringify({ mcpServers: { 'context-mcp': MCP_SERVER_CMD } }, null, 2);
+      _writeFile(join(dir, '.gemini', 'settings.json'), cfg, '.gemini/settings.json');
+      if (scope === 'project') {
+        const md = _tpl('GEMINI.md');
+        if (md) _writeFile(join(dir, 'GEMINI.md'), md, 'GEMINI.md');
+      }
     },
   },
   codex: {
     label: 'Codex CLI',
-    install(cwd) {
+    restartNote: 'Restart your Codex CLI session.',
+    install(dir, scope) {
       const toml = `[[mcp_servers]]\nname    = "context-mcp"\ncommand = "npx"\nargs    = ["-y", "context-mcp-server@latest"]\n`;
-      _writeFile(join(cwd, '.codex', 'config.toml'), toml, '.codex/config.toml');
-      const md = _tpl('AGENTS.md');
-      if (md) _writeFile(join(cwd, 'AGENTS.md'), md, 'AGENTS.md');
+      _writeFile(join(dir, '.codex', 'config.toml'), toml, '.codex/config.toml');
+      if (scope === 'project') {
+        const md = _tpl('AGENTS.md');
+        if (md) _writeFile(join(dir, 'AGENTS.md'), md, 'AGENTS.md');
+      }
+      // Register via codex CLI so server is active immediately
+      const reg = spawnSync(
+        'codex', ['mcp', 'add', 'context-mcp', '--', 'npx', '-y', 'context-mcp-server@latest'],
+        { encoding: 'utf8', shell: true },
+      );
+      if (reg.status === 0) {
+        console.log(`  ${ok('✓')} ${'registered via codex mcp add'.padEnd(28)}`);
+      } else {
+        console.log(`  ${faint('ℹ')} codex CLI not found — server will load on next Codex session`);
+      }
     },
   },
   windsurf: {
     label: 'Windsurf',
-    install(cwd) {
+    restartNote: 'Restart Windsurf to load the updated MCP config.',
+    install(dir) {
       const rules = _tpl('windsurf-rules.md');
-      if (rules) _writeFile(join(cwd, '.windsurf', 'rules', 'context-mcp.md'), rules, '.windsurf/rules/context-mcp.md');
+      if (rules) _writeFile(join(dir, '.windsurf', 'rules', 'context-mcp.md'), rules, '.windsurf/rules/context-mcp.md');
       const globalCfgPath = join(homedir(), '.codeium', 'windsurf', 'mcp_config.json');
       let existing = {};
       try { existing = JSON.parse(readFileSync(globalCfgPath, 'utf8')); } catch {}
@@ -600,7 +716,7 @@ const PLATFORMS = {
   },
 };
 
-function cmdInstall(args) {
+async function cmdInstall(args) {
   const flags = new Set(args.map(a => a.replace(/^--/, '')));
   const all     = flags.has('all');
   const initial = flags.has('initial');
@@ -665,22 +781,56 @@ function cmdInstall(args) {
     return;
   }
 
-  const cwd = process.cwd();
-  printSection('Install', keys.map(k => PLATFORMS[k].label).join(', '));
-  console.log('');
+  // ── Scope prompt (skip for windsurf-only installs — it's always global) ──────
+  const nonWindsurf = keys.filter(k => k !== 'windsurf');
+  let scope = 'project';
+  let baseDir = process.cwd();
+
+  if (nonWindsurf.length > 0) {
+    const rl  = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ask = q => new Promise(resolve => rl.question(`  ${accent('›')} ${muted(q)} `, resolve));
+
+    printSection('Install', keys.map(k => PLATFORMS[k].label).join(', '));
+    console.log('');
+    console.log(`  ${muted('Install scope:')}`);
+    console.log(`  ${accent('1.')} For this project  ${faint('(writes config into current directory)')}`);
+    console.log(`  ${accent('2.')} Globally          ${faint('(writes config to your home directory)')}`);
+    console.log('');
+    const answer = (await ask('Choose (1/2) [1]:')).trim();
+    rl.close();
+    console.log('');
+
+    if (answer === '2') {
+      scope = 'global';
+      baseDir = homedir();
+    }
+  } else {
+    printSection('Install', keys.map(k => PLATFORMS[k].label).join(', '));
+    console.log('');
+  }
 
   for (const key of keys) {
-    console.log(`  ${bold(lblue(PLATFORMS[key].label))}`);
+    const platform = PLATFORMS[key];
+    console.log(`  ${bold(lblue(platform.label))}`);
+    const dir = key === 'windsurf' ? process.cwd() : baseDir;
     try {
-      PLATFORMS[key].install(cwd);
+      platform.install(dir, scope);
     } catch (err) {
       console.log(`  ${bad('✗')} failed: ${err.message}`);
+    }
+    if (platform.restartNote) {
+      console.log(`  ${faint('→ ' + platform.restartNote)}`);
     }
     console.log('');
   }
 
+  const destLabel = scope === 'global' ? homedir().replace(/\\/g, '/') : process.cwd().replace(/\\/g, '/');
   console.log(line());
-  console.log(faint(`  ${keys.length} platform(s) installed into ${cwd.replace(/\\/g, '/')}`));
+  console.log(faint(`  ${keys.length} platform(s) installed  ·  scope: ${scope}  ·  ${destLabel}`));
+  console.log('');
+
+  // ── Global gitignore — add context-mcp runtime files if global gitignore exists ──
+  _updateGlobalGitignore();
   console.log('');
 
   // ── Python / uv setup (codegraph) ─────────────────────────────────────────
@@ -853,10 +1003,10 @@ async function cmdSettings(existingRl) {
   console.log('');
 
   const choice = (await ask('Edit field (1-' + FIELDS.length + '):')).trim();
-  if (!existingRl) rl.close();
 
   const idx = parseInt(choice) - 1;
   if (isNaN(idx) || idx < 0 || idx >= FIELDS.length) {
+    if (!existingRl) rl.close();
     console.log(`  ${faint('no changes made')}`);
     return;
   }
@@ -1007,7 +1157,7 @@ async function interactive() {
         case 'benchmark': case 'bench':
           clearScreen(); printCompactHeader('benchmark'); cmdBenchmark(); break;
         case 'install':
-          clearScreen(); printCompactHeader('install'); cmdInstall(rest); break;
+          clearScreen(); printCompactHeader('install'); await cmdInstall(rest); break;
         case 'online':
           clearScreen(); printCompactHeader('online'); cmdOnline(rest); break;
         case 'settings': case 'config':
@@ -1033,6 +1183,25 @@ function printBye() {
   console.log(`\n  ${ok('✓')} ${bold(lblue('goodbye'))}  ${faint('keep building')}\n`);
 }
 
+// ── Update check ──────────────────────────────────────────────────────────────
+
+async function checkForUpdate() {
+  try {
+    const result = spawnSync(
+      'npm', ['view', 'context-mcp-server', 'version', '--json'],
+      { encoding: 'utf8', timeout: 3000, shell: true },
+    );
+    if (result.status !== 0 || !result.stdout) return;
+    const parsed = JSON.parse(result.stdout.trim());
+    const latest = typeof parsed === 'string' ? parsed : String(parsed);
+    const current = pkg.version;
+    if (latest && latest !== current) {
+      console.log(`  ${warn('↑')} ${bold('Update available')}  ${faint(current)} ${accent('→')} ${ok(latest)}  ${faint('run:')} ${accent('npm i -g context-mcp-server@latest')}`);
+      console.log('');
+    }
+  } catch {}
+}
+
 // ── CLI entry point ───────────────────────────────────────────────────────────
 
 (async () => {
@@ -1052,7 +1221,24 @@ function printBye() {
     case 'benchmark': case 'bench':
       cmdBenchmark(); break;
     case 'install':
-      cmdInstall(rest); break;
+      await cmdInstall(rest);
+      process.exit(0);
+      break;
+    case 'update': {
+      printSection('Update');
+      console.log('');
+      const upd = spawnSync(
+        'npm', ['install', '-g', 'context-mcp-server@latest'],
+        { encoding: 'utf8', shell: true, stdio: 'inherit' },
+      );
+      if (upd.status === 0) {
+        console.log(`\n  ${ok('✓')} ${bold('context-mcp updated to latest')}`);
+      } else {
+        console.log(`\n  ${bad('✗')} update failed — try: ${accent('npm i -g context-mcp-server@latest')}`);
+      }
+      console.log('');
+      break;
+    }
     case 'online':
       cmdOnline(rest); break;
     case 'settings': case 'config':
@@ -1062,10 +1248,13 @@ function printBye() {
     case 'delete': case 'del': case 'rm':
       cmdDelete(rest); break;
     case 'help': case '--help': case '-h':
-      printUsage(); break;
+      await checkForUpdate();
+      printUsage();
+      break;
     case '--version': case '-v':
       console.log(pkg.version); break;
     default:
+      await checkForUpdate();
       await interactive();
   }
 })();

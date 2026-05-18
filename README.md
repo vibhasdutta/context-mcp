@@ -371,7 +371,10 @@ Available to web clients (Claude.ai, ChatGPT) only — local AI clients use thei
 
 All file and git operations are sandboxed to the registered project root. Enable git tools with `--access-git` or `access_git: true` in config.
 
-### CodeGraph
+### ContextGraph (CodeGraph)
+
+> Also referred to as **ContextGraph** — the MCP tools use the `codegraph_*` prefix but both names mean the same thing.
+
 - `codegraph_build` — AST scan using tree-sitter: functions, classes, imports, edges. Runs locally, no API cost.
 - `codegraph_query` — fetch any details about the codebase using natural language: find functions, classes, files, dependencies, callers
 - `codegraph_explain` — single node: type, file location, all direct connections (depends_on, used_by)
@@ -381,15 +384,25 @@ All file and git operations are sandboxed to the registered project root. Enable
 
 ### Multi-AI Support
 
-| AI | Config File | Instruction File |
-|----|------------|-----------------|
-| Claude Code | `.claude/mcp.json` | `CLAUDE.md` |
-| VS Code Copilot | `.vscode/mcp.json` | `CLAUDE.md` |
-| Cursor | `.cursor/mcp.json` | `.cursor/rules/context-mcp.mdc` |
-| Gemini CLI | `.gemini/settings.json` | `GEMINI.md` |
-| Codex CLI | `.codex/config.toml` | `AGENTS.md` |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `.windsurf/rules/context-mcp.md` |
-| Claude.ai / ChatGPT | HTTP (`ctx online`) | — |
+| AI | Config File | Instructions | Slash Commands |
+|----|------------|--------------|----------------|
+| Claude Code | `.claude/mcp.json` | Skill → `~/.claude/skills/context-mcp/` (global) | ✓ (3 commands) |
+| Cursor | `.cursor/mcp.json` | Rule → `.cursor/rules/context-mcp.mdc` | — |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | Rule → `.windsurf/rules/context-mcp.md` | — |
+| Gemini CLI | `.gemini/settings.json` | `GEMINI.md` | — |
+| Codex CLI | `.codex/config.toml` | `AGENTS.md` | — |
+| VS Code Copilot | `.vscode/mcp.json` | — | — |
+| Claude.ai / ChatGPT | HTTP (`ctx online`) | — | — |
+
+> Claude Code installs context-mcp as a **skill** (`~/.claude/skills/context-mcp/SKILL.md`) — available globally across all projects, not just the current one. Cursor and Windsurf use their native rules system. Gemini and Codex use plain instruction files since they have no skill/rules system.
+
+`ctx install --claude` also writes slash commands into `.claude/commands/`:
+
+| Command | What it does |
+|---------|-------------|
+| `/context-resume` | Resume context for the current project |
+| `/graph-build` | Build or rebuild the ContextGraph |
+| `/save-context` | Save a note, decision, or bug to context |
 
 > The context store lives at `~/.context-mcp/` — not inside any tool, IDE, or session. A decision saved in Claude Code is visible in Cursor. A bug logged from Gemini CLI shows up when you resume in Codex.
 
