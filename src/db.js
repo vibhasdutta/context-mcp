@@ -23,6 +23,11 @@ const PROJECTS_PATH     = join(DATA_DIR, 'projects.json');
 
 const MAX_CONTENT_LENGTH = 5000;
 const PREVIEW_LENGTH = 200;
+
+// Normalize file paths for cross-platform comparison (Windows case + slash variants)
+function normPath(p) {
+  return p ? p.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : '';
+}
 const WRITE_DEBOUNCE_MS = 500;
 const LOCK_WAIT_TIMEOUT_MS = 2000;
 
@@ -126,9 +131,9 @@ function mergeStore(latest, local) {
     if (_changedDiscussionNames.has(disc.name)) discussionsByName.set(disc.name, disc);
   }
 
-  const graphsByPath = new Map((latest.graphs || []).map(g => [g.path, g]));
+  const graphsByPath = new Map((latest.graphs || []).map(g => [normPath(g.path), g]));
   for (const graph of (local.graphs || [])) {
-    if (_changedGraphPaths.has(graph.path)) graphsByPath.set(graph.path, graph);
+    if (_changedGraphPaths.has(graph.path)) graphsByPath.set(normPath(graph.path), graph);
   }
 
   const projectsById = new Map((latest.projects || []).map(p => [p.id, p]));
@@ -713,7 +718,7 @@ export function flushStore() { flushToDisk(); }
 
 // ── Auto-compaction ───────────────────────────────────────────────────────────
 
-const COMPACTION_THRESHOLD = 50;
+const COMPACTION_THRESHOLD = 20;
 const COMPACTION_TARGET = 30;
 
 export function shouldCompact(project) {
@@ -753,7 +758,14 @@ export function compactProject(project, summaryContent) {
 export function saveGraph({ path, nodes, edges, communities, cached, changed, time_ms, summary }) {
   refreshFromDisk();
   const store = load();
-  const existing = store.graphs.find(g => g.path === path);
+  // Deduplicate: collapse any case/slash variants of same path, keep newest
+  const dupes = store.graphs.filter(g => normPath(g.path) === normPath(path));
+  if (dupes.length > 1) {
+    const keep = dupes.reduce((a, b) => (a.builtAt >= b.builtAt ? a : b));
+    store.graphs = store.graphs.filter(g => normPath(g.path) !== normPath(path));
+    store.graphs.push(keep);
+  }
+  const existing = store.graphs.find(g => normPath(g.path) === normPath(path));
   const record = {
     path,
     nodes:       nodes       ?? existing?.nodes       ?? 0,
@@ -777,7 +789,7 @@ export function saveGraph({ path, nodes, edges, communities, cached, changed, ti
 
 export function getGraph(path) {
   const store = load();
-  if (path) return store.graphs.find(g => g.path === path) || null;
+  if (path) return store.graphs.find(g => normPath(g.path) === normPath(path)) || null;
   return store.graphs;
 }
 

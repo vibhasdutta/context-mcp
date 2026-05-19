@@ -3,7 +3,7 @@ import { fireAutoLink } from './autoLink.js';
 
 export function saveAutoContext({ title, content, type, files, state, tags = [] }) {
   const entry = saveContext({
-    project:   state.sessionProject || 'global',
+    project:   state.sessionProject || null,
     sessionId: state.sessionId || null,
     title,
     content,

@@ -92,9 +92,15 @@ export async function handle(args, state) {
         .filter(e => e.status !== 'archived');
       const discussions   = listDiscussions({ project: proj, status: 'active' });
       const allGraphs     = listGraphs();
-      const graph         = proj
-        ? allGraphs.find(g => g.path?.toLowerCase().includes(proj.toLowerCase())) || allGraphs[0] || null
-        : allGraphs[0] || null;
+      const np = p => (p || '').toLowerCase().replace(/\\/g, '/');
+      const graph         = resolvedRoot
+        ? allGraphs.find(g => np(g.path) === np(resolvedRoot)) || null
+        : proj
+          ? allGraphs.find(g => {
+              const parts = np(g.path).split('/');
+              return parts[parts.length - 1] === proj.toLowerCase();
+            }) || null
+          : null;
       const totalEntries  = countContext(proj);
 
       // Auto-restore single active discussion

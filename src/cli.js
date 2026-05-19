@@ -186,7 +186,7 @@ function cmdList(args) {
 
   for (const projectName of projectNames) {
     const pData     = projects[projectName];
-    const graph     = allGraphs.find(g => g.path?.toLowerCase().includes(projectName.toLowerCase()));
+    const graph     = _graphForProject(allGraphs, projectName);
     const activeD   = pData.discussions.filter(d => d.status === 'active').length;
     const totalSecs = (pData.contexts.length > 0 ? 1 : 0) + (pData.discussions.length > 0 ? 1 : 0) + (graph ? 1 : 0);
     let   secIdx    = 0;
@@ -240,7 +240,7 @@ function cmdList(args) {
   }
 
   // Orphan graphs (no matching project)
-  const orphanGraphs = allGraphs.filter(g => !projectNames.some(p => g.path?.toLowerCase().includes(p.toLowerCase())));
+  const orphanGraphs = allGraphs.filter(g => !projectNames.some(p => _graphForProject([g], p)));
   if (orphanGraphs.length) {
     console.log(`\n  ${color(C.dblue, '◇')} ${muted('other graphs')}`);
     for (const g of orphanGraphs) {
@@ -292,7 +292,7 @@ function cmdProjects() {
     const entries   = getContext({ project: project.name, limit: 3, compact: true }).filter(e => e.status !== 'archived');
     const discs     = allDiscs.filter(d => (d.project || 'global') === project.name);
     const activeD   = discs.filter(d => d.status === 'active');
-    const graph     = graphs.find(g => g.path?.toLowerCase().includes(project.name.toLowerCase()));
+    const graph     = _graphForProject(graphs, project.name);
 
     const barLen = Math.min(Math.ceil(project.count / 2), 24);
     const bar    = color(C.dblue, '█'.repeat(barLen)) + color(C.darkgray, '░'.repeat(24 - barLen));
@@ -567,6 +567,30 @@ const _GLOBAL_GITIGNORE_ENTRIES = [
   '.mcp.json',
 ];
 
+// Match a graph to a project by exact last-path-component comparison (not substring)
+function _graphForProject(graphs, projectName) {
+  const norm = p => (p || '').toLowerCase().replace(/\\/g, '/').replace(/\/$/, '');
+  const name = projectName.toLowerCase();
+  return graphs.find(g => norm(g.path).split('/').pop() === name) || null;
+}
+
+const _PROJECT_GITIGNORE_ENTRIES = [
+  '.claude/', '.cursor/', '.vscode/', '.gemini/', '.codex/',
+  'codegraph-cache/', '.mcp.json', 'CLAUDE.md', 'GEMINI.md', 'AGENTS.md',
+];
+
+function _updateProjectGitignore(projectDir) {
+  const giPath = join(projectDir, '.gitignore');
+  const existing = existsSync(giPath) ? readFileSync(giPath, 'utf8') : '';
+  const lines = existing.split(/\r?\n/);
+  const missing = _PROJECT_GITIGNORE_ENTRIES.filter(e => !lines.includes(e));
+  if (!missing.length) return;
+  const block = '\n# context-mcp — written by ctx install\n' + missing.join('\n') + '\n';
+  writeFileSync(giPath, (existing ? existing.trimEnd() : '') + block, 'utf8');
+  console.log(`  ${ok('✓')} ${'project .gitignore'.padEnd(28)} ${faint(giPath.replace(/\\/g, '/'))}`);
+  for (const e of missing) console.log(`      ${faint('+ ' + e)}`);
+}
+
 function _updateGlobalGitignore() {
   // Resolve global gitignore path: git config > ~/.gitignore_global > ~/.gitignore
   let giPath = null;
@@ -828,6 +852,9 @@ async function cmdInstall(args) {
   console.log(line());
   console.log(faint(`  ${keys.length} platform(s) installed  ·  scope: ${scope}  ·  ${destLabel}`));
   console.log('');
+
+  // ── Project .gitignore — add context-mcp entries for this project ──────────
+  _updateProjectGitignore(process.cwd());
 
   // ── Global gitignore — add context-mcp runtime files if global gitignore exists ──
   _updateGlobalGitignore();

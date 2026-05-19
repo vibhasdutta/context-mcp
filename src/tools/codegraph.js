@@ -184,7 +184,10 @@ export function handle(name, args, state) {
         summary:     result.summary || '',
       });
 
-      const project = state?.sessionProject || 'global';
+      const inferredProject = args.path
+        ? args.path.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop()
+        : null;
+      const project = state?.sessionProject || inferredProject || null;
       const title   = `CodeGraph — ${args.path}`;
       const content = [
         `nodes: ${result.nodes} | edges: ${result.edges} | communities: ${result.communities}`,

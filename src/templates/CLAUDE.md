@@ -15,7 +15,12 @@ Every conversation starts with `context.resume`. Every codebase question uses `c
 
 ## 1. Start of Every Conversation (MANDATORY)
 
-Call `context` tool, `action: "resume"`, `project: "<project-name>"` **before anything else**.
+Call `context` tool **before anything else** with:
+- `action: "resume"`
+- `project: "<basename of git repo root dir>"` — infer from cwd if not stated
+- `rootPath: "<absolute path to git repo root>"` — required for sandbox + graph lookup
+
+Both fields are required: `project` names the memory bucket, `rootPath` enables exact graph matching and file sandboxing.
 
 Returns:
 - `recentEntries` — decisions, bugs, notes from previous conversations
@@ -34,7 +39,7 @@ Then:
 
 **After graph build or rebuild** — every time `codegraph_build` completes:
 ```
-context.save  type: "architecture"  title: "ContextGraph built — <project>"
+context.save  project: "<project>"  type: "architecture"  title: "ContextGraph built — <project>"
 content: "nodes: X | edges: Y | communities: Z"
 ```
 
@@ -59,7 +64,7 @@ Do NOT save: routine reads, search results, temporary debugging dead-ends.
 
 Feature spans multiple sessions → `discussion.create` or `discussion.update`.
 Need past info → `search` before asking user.
-Always pass `project`. Auto-compact fires at >50 entries.
+Always pass `project`. Auto-compact fires at >20 entries.
 
 ---
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codegraph-mcp"
-version = "1.0.5"
+version = "1.0.6"
 description = "Codebase knowledge graph MCP server — AST extraction, graph queries, community detection"
 readme = "README.md"
 requires-python = ">=3.11"

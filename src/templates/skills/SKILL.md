@@ -18,9 +18,12 @@ Persistent memory + codebase knowledge graph across every conversation.
 
 ## MANDATORY: Start of Every Conversation
 
-Call `context` tool, `action: "resume"`, `project: "<project-name>"` **before any tool or response**.
+Call `context` tool **before any tool or response** with:
+- `action: "resume"`
+- `project: "<basename of git repo root dir>"` — infer from `cwd` if not stated
+- `rootPath: "<absolute path to git repo root>"` — required for sandbox + graph lookup
 
-Infer `project` from the working directory name if not stated.
+Both fields are required: `project` names the memory bucket, `rootPath` enables exact graph matching and file sandboxing.
 
 Returns:
 - `recentEntries` — decisions, bugs, notes from past sessions
@@ -40,7 +43,7 @@ Then:
 **1. After graph build or rebuild**
 Every time `codegraph_build` completes successfully, immediately call:
 ```
-context.save  type: "architecture"  title: "ContextGraph built — <project>"
+context.save  project: "<project>"  type: "architecture"  title: "ContextGraph built — <project>"
 content: "nodes: X | edges: Y | communities: Z | built: <timestamp>"
 ```
 
@@ -70,7 +73,7 @@ Do NOT save for: routine file reads, search results, explanations of existing co
 | Deploy / release step discovered | `note` |
 | Milestone / feature / task completed | `note` |
 
-Always pass `project`. Feature spans multiple sessions → `discussion.create` or `discussion.update`. Need past info → `search` before asking user. Auto-compact fires at >50 entries.
+Always pass `project`. Feature spans multiple sessions → `discussion.create` or `discussion.update`. Need past info → `search` before asking user. Auto-compact fires at >20 entries.
 
 ---
 

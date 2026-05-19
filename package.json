@@ -1,6 +1,6 @@
 {
   "name": "context-mcp-server",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Persistent AI memory + codebase knowledge graph MCP server. Works across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Claude.ai, and ChatGPT.",
   "type": "module",
   "bin": {

@@ -29,11 +29,10 @@ function resolveCwd(args, state) {
   // Auto-detect project root on first use if not already configured.
   if (!state.projectRootPath) {
     const detected = autoDetectRoot(args.cwd ? pathResolve(args.cwd) : process.cwd());
-    if (detected) state.projectRootPath = detected;
+    state.projectRootPath = detected || process.cwd();
   }
-  const raw = args.cwd ? pathResolve(args.cwd) : (state.projectRootPath || process.cwd());
-  if (state.projectRootPath) return guardPath(raw, state.projectRootPath);
-  return raw;
+  const raw = args.cwd ? pathResolve(args.cwd) : state.projectRootPath;
+  return guardPath(raw, state.projectRootPath);
 }
 
 const ROOT_NOTE = ' All paths must be within the project root (sandboxed — access outside root is denied).';
