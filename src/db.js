@@ -312,10 +312,15 @@ export function updateContext({ id, content, title, tags, type, status, files, c
  * @param {Object} opts
  * @param {boolean} opts.compact - If true, returns previews instead of full content (saves tokens)
  */
-export function getContext({ project, tags, limit = 20, compact = false } = {}) {
+export function getContext({ project, tags, limit = 20, compact = false, ids } = {}) {
   refreshFromDisk();
   const store = load();
   let results = store.contexts;
+  if (ids && ids.length) {
+    const idSet = new Set(ids);
+    results = results.filter(c => idSet.has(c.id));
+    return compact ? results.map(compactEntry) : results;
+  }
   if (project) results = results.filter(c => c.project === project || c.project === 'global');
   if (tags && tags.length) {
     const tagList = Array.isArray(tags) ? tags : tags.split(',').map(t => t.trim());
@@ -348,12 +353,14 @@ export function searchContext({ query, project, limit = 10, compact = false }) {
   return compact ? sliced.map(compactEntry) : sliced;
 }
 
-export function deleteContext({ id }) {
+export function deleteContext({ id, ids }) {
   refreshFromDisk();
   const store = load();
   const before = store.contexts.length;
-  const removed = store.contexts.filter(c => c.id === id);
-  store.contexts = store.contexts.filter(c => c.id !== id);
+  const idSet = new Set(ids && ids.length ? ids : (id ? [id] : []));
+  if (!idSet.size) return { deleted: 0 };
+  const removed = store.contexts.filter(c => idSet.has(c.id));
+  store.contexts = store.contexts.filter(c => !idSet.has(c.id));
   if (store.contexts.length < before) {
     for (const entry of removed) {
       _deletedContextIds.add(entry.id);

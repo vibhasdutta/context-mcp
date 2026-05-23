@@ -28,9 +28,9 @@ export const definition = {
     `Factual memory — record what happened, what was decided, what broke, what was built.\n` +
     `• "resume"       — START HERE every conversation. Loads recent context, active discussions, and graph status for a project.\n` +
     `• "save"         — Store a note, decision, bug, or code snippet. Auto-deduplicates.\n` +
-    `• "get"          — Load recent entries (compact previews). Auto-digests when large.\n` +
+    `• "get"          — Load entries. Pass id/ids to fetch specific ones, or project/tags/limit for recent.\n` +
     `• "update"       — Edit an existing entry by id (any field).\n` +
-    `• "delete"       — Remove an entry by id.\n` +
+    `• "delete"       — Remove one entry (id) or multiple at once (ids: [...]).\n` +
     `• "list_projects"— Show all projects and entry counts.`,
   inputSchema: {
     type: 'object',
@@ -50,7 +50,8 @@ export const definition = {
       expiresAt:     { type: 'string' },
       limit:         { type: 'number' },
       includeArchived: { type: 'boolean' },
-      id:            { type: 'string' },
+      id:            { type: 'string', description: 'Single entry ID (get/update/delete)' },
+      ids:           { type: 'array', items: { type: 'string' }, description: 'Multiple entry IDs — fetch or delete several at once' },
     },
     required: ['action'],
   },
@@ -189,8 +190,20 @@ export async function handle(args, state) {
 
     case 'get': {
       if (!args.project && state.sessionProject) args = { ...args, project: state.sessionProject };
-      archiveExpired(args.project);
       const includeArchived = args.includeArchived === true;
+
+      // Fetch by specific ID(s) — bypass project/tag/limit filters
+      const ids = args.ids || (args.id ? [args.id] : null);
+      if (ids) {
+        const entries = getContext({ ids, compact: false })
+          .filter(e => includeArchived || e.status !== 'archived');
+        return {
+          entries, count: entries.length,
+          message: entries.length ? `Found ${entries.length} entries.` : 'No entries found for given IDs.',
+        };
+      }
+
+      archiveExpired(args.project);
       let entries = getContext({ project: args.project, tags: args.tags, limit: args.limit, compact: true });
       if (!includeArchived) entries = entries.filter(e => e.status !== 'archived');
       const fullEntries = entries.length > 10
@@ -216,8 +229,9 @@ export async function handle(args, state) {
     }
 
     case 'delete': {
-      if (!args.id) throw new Error('id is required for delete');
-      return deleteContext(args);
+      if (!args.id && !args.ids) throw new Error('id or ids is required for delete');
+      const result = deleteContext(args);
+      return { ...result, message: `Deleted ${result.deleted} entr${result.deleted === 1 ? 'y' : 'ies'}.` };
     }
 
     case 'list_projects': {

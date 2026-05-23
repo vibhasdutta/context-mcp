@@ -4,8 +4,7 @@ codegraph/server.py — MCP server exposing codebase knowledge graph tools.
 
 Tools:
   codegraph_build   — scan project, extract AST nodes, build graph (local only, no API)
-  codegraph_query   — fetch details about any part of the codebase via natural language
-  codegraph_explain — look up a specific node: type, file, connections
+  codegraph_query   — structural question OR single-node lookup (or both); replaces codegraph_explain
   codegraph_report  — return full CODEGRAPH_REPORT.md
   codegraph_nodes   — list nodes of a given type
   codegraph_path    — shortest path between two concepts
@@ -56,36 +55,21 @@ TOOLS = [
     Tool(
         name="codegraph_query",
         description=(
-            "Fetch details about any part of the codebase using a natural language question. "
-            "Searches the knowledge graph — instant, no API call. "
-            "Use for: finding functions, classes, files, understanding what exists, "
-            "what a module contains, what calls what, what imports what. "
-            "NOT for: bug investigation or tracing unexpected behavior — read the file for that."
+            "Ask a structural question about the codebase OR look up a specific node by name — or both in one call. "
+            "Pass `question` for natural-language traversal: what calls X, what does module Y depend on. "
+            "Pass `node` for fast single-node lookup: returns type, file, depends_on, used_by. "
+            "Pass both to get node detail + surrounding graph context together. "
+            "Returns structured text within token_budget. Use before reading any files."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "path":         {"type": "string", "description": "Project root"},
-                "question":     {"type": "string", "description": "Natural language question"},
+                "question":     {"type": "string", "description": "Natural language question about the codebase"},
+                "node":         {"type": "string", "description": "Node name or partial name to look up (type, file, deps, callers)"},
                 "token_budget": {"type": "integer", "description": "Max tokens in response (default 2000)"},
             },
-            "required": ["path", "question"],
-        },
-    ),
-    Tool(
-        name="codegraph_explain",
-        description=(
-            "Look up a specific function, class, or module by name — returns its type, file location, "
-            "and all direct connections (what it depends on, what uses it). "
-            "Use when you already know the name and want its full context in the graph."
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Project root"},
-                "node": {"type": "string", "description": "Node name or partial name"},
-            },
-            "required": ["path", "node"],
+            "required": ["path"],
         },
     ),
     Tool(
@@ -143,7 +127,7 @@ async def call_tool(name: str, arguments: dict):
 async def _dispatch(name: str, args: dict):
     if name == "codegraph_build":   return await _build(args)
     if name == "codegraph_query":   return await _query(args)
-    if name == "codegraph_explain": return await _explain(args)
+    if name == "codegraph_explain": return await _query(args)
     if name == "codegraph_report":  return await _report(args)
     if name == "codegraph_nodes":   return await _nodes(args)
     if name == "codegraph_path":    return await _path(args)
@@ -223,19 +207,8 @@ async def _build(args: dict) -> dict:
 
 # ── Query / Report / Nodes / Path ─────────────────────────────────────────────
 
-async def _query(args: dict) -> dict:
-    graph_dict = load_graph(args["path"])
-    if not graph_dict:
-        raise ValueError("No graph found. Run codegraph_build first.")
-    return graph_answer(args["question"], graph_dict, token_budget=args.get("token_budget", 2000))
-
-
-async def _explain(args: dict) -> dict:
-    graph_dict = load_graph(args["path"])
-    if not graph_dict:
-        raise ValueError("No graph found. Run codegraph_build first.")
-
-    query = args["node"].lower()
+def _explain_node(node_name: str, graph_dict: dict) -> dict:
+    query = node_name.lower()
     nodes = graph_dict.get("nodes", [])
     edges = graph_dict.get("edges", [])
 
@@ -244,8 +217,8 @@ async def _explain(args: dict) -> dict:
         match = next((n for n in nodes if query in n.get("name", "").lower()), None)
     if not match:
         candidates = [n["name"] for n in nodes if query in n.get("id", "").lower()]
-        return {"found": False, "query": args["node"],
-                "message": f"No node matching '{args['node']}'.",
+        return {"found": False, "query": node_name,
+                "message": f"No node matching '{node_name}'.",
                 "suggestions": candidates[:10]}
 
     nid = match["id"]
@@ -254,13 +227,13 @@ async def _explain(args: dict) -> dict:
         if e.get("from") == nid:
             t = next((n for n in nodes if n.get("id") == e.get("to")), None)
             depends_on.append({"name": t["name"] if t else e["to"],
-                               "file": t.get("file","") if t else "",
-                               "relation": e.get("relation","→")})
+                               "file": t.get("file", "") if t else "",
+                               "relation": e.get("relation", "→")})
         elif e.get("to") == nid:
             s = next((n for n in nodes if n.get("id") == e.get("from")), None)
             used_by.append({"name": s["name"] if s else e["from"],
-                            "file": s.get("file","") if s else "",
-                            "relation": e.get("relation","→")})
+                            "file": s.get("file", "") if s else "",
+                            "relation": e.get("relation", "→")})
 
     return {
         "found":       True,
@@ -270,8 +243,26 @@ async def _explain(args: dict) -> dict:
         "description": match.get("description") or None,
         "depends_on":  depends_on[:20],
         "used_by":     used_by[:20],
-        "hint": None,
     }
+
+
+async def _query(args: dict) -> dict:
+    graph_dict = load_graph(args["path"])
+    if not graph_dict:
+        raise ValueError("No graph found. Run codegraph_build first.")
+
+    question  = args.get("question")
+    node_name = args.get("node")
+
+    if not question and not node_name:
+        raise ValueError("Provide at least one of: question, node")
+
+    result = {}
+    if node_name:
+        result["node"] = _explain_node(node_name, graph_dict)
+    if question:
+        result["query"] = graph_answer(question, graph_dict, token_budget=args.get("token_budget", 2000))
+    return result
 
 
 async def _report(args: dict) -> dict:

@@ -41,91 +41,22 @@ export const definitions = [
     },
   },
   {
-    name: 'codegraph_extract',
-    description:
-      'Return raw content of changed code and doc/PDF files so the AI can write descriptions. ' +
-      'Code files: lists existing AST nodes — AI writes a description for each. ' +
-      'Doc files: AI extracts new concept nodes. ' +
-      'Call after codegraph_build, then call codegraph_add_nodes with results. ' +
-      'Pass force:true to re-enrich all files (not just changed ones).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        path:  { type: 'string', description: 'Project root (same as codegraph_build)' },
-        limit: { type: 'integer', description: 'Max files to return per call (default 10)' },
-        force: { type: 'boolean', description: 'Return all files, not just changed (for re-enrichment)' },
-      },
-      required: ['path'],
-    },
-  },
-  {
-    name: 'codegraph_add_nodes',
-    description:
-      'Add concept nodes extracted by the AI into the graph. ' +
-      'Call after reading codegraph_extract output. ' +
-      'Each node: name, type, file, and optionally description and relations.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        path:  { type: 'string', description: 'Project root' },
-        nodes: {
-          type: 'array',
-          description: 'Concept nodes to add',
-          items: {
-            type: 'object',
-            properties: {
-              name:        { type: 'string' },
-              type:        { type: 'string', description: 'class|function|concept|service|decision|requirement' },
-              file:        { type: 'string', description: 'Relative file path this concept came from' },
-              description: { type: 'string' },
-              relations: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    name:     { type: 'string' },
-                    relation: { type: 'string', description: 'depends-on|uses|implements|defines|documents' },
-                  },
-                },
-              },
-            },
-            required: ['name', 'type', 'file'],
-          },
-        },
-      },
-      required: ['path', 'nodes'],
-    },
-  },
-  {
     name: 'codegraph_query',
     description:
-      'Ask a structural/dependency question about the codebase. ' +
-      'Pure graph traversal — returns NODE/EDGE structured text truncated to token_budget. ' +
-      'Good for: "what does module X depend on?", "what calls function Y?", "what is the path from A to B?". ' +
-      'NOT for: bug investigation, logic errors, or understanding what code actually does — read the file directly for those.',
+      'Ask a structural question about the codebase OR look up a specific node by name — or both in one call. ' +
+      'Pass `question` for natural-language traversal: "what does module X depend on?", "what calls function Y?". ' +
+      'Pass `node` for fast single-node lookup: returns type, file, depends_on, used_by. ' +
+      'Pass both to get node detail + surrounding graph context together. ' +
+      'Returns structured text within token_budget. Use before reading any files.',
     inputSchema: {
       type: 'object',
       properties: {
         path:         { type: 'string', description: 'Project root' },
-        question:     { type: 'string', description: 'Natural language question' },
+        question:     { type: 'string', description: 'Natural language question about the codebase' },
+        node:         { type: 'string', description: 'Node name or partial name to look up (type, file, deps, callers)' },
         token_budget: { type: 'integer', description: 'Max tokens in response (default 2000)' },
       },
-      required: ['path', 'question'],
-    },
-  },
-  {
-    name: 'codegraph_explain',
-    description:
-      'Look up a node by name — returns description, type, file, and direct neighbors (depends_on + used_by). ' +
-      'Use to understand what a specific function/class/module does and how it connects. ' +
-      'Descriptions are AI-written via codegraph_add_nodes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Project root' },
-        node: { type: 'string', description: 'Node name or partial name' },
-      },
-      required: ['path', 'node'],
+      required: ['path'],
     },
   },
   {

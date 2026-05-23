@@ -107,8 +107,8 @@ function printSection(title, meta = '') {
 function printUsage() {
   printBanner();
 
-  // Terminal commands (ctx ...)
-  printSection('Terminal commands', 'run from your shell');
+  // Terminal commands (ctx / context ...)
+  printSection('Terminal commands', 'run from your shell  (ctx … or context …)');
   const cmd = (c, desc) => console.log(`  ${accent(c.padEnd(40))} ${faint(desc)}`);
   cmd('ctx',                           'open interactive mode');
   cmd('ctx list [project]',            'list entries + discussions + graphs');
@@ -131,8 +131,8 @@ function printUsage() {
   cmd('ctx help',                      'show this screen');
   console.log('');
 
-  // Interactive mode commands (no ctx prefix)
-  printSection('Interactive mode', 'type these inside  ctx  (no "ctx" prefix)');
+  // Interactive mode commands (no prefix needed)
+  printSection('Interactive mode', 'type these inside the UI — no "ctx" prefix needed');
   const icmd = (c, desc) => console.log(`  ${accent(c.padEnd(40))} ${faint(desc)}`);
   icmd('list [project]',               'list entries');
   icmd('search <query>',               'search context');
@@ -429,7 +429,7 @@ function cmdBenchmark() {
   printSection('Benchmark', 'real token savings');
 
   const RESUME_LIMIT = 15;
-  const COMPACT_AT   = 50;
+  const COMPACT_AT   = 20;
 
   // ── Measure entry sizes from actual stored data ──────────────────────────────
   const allEntries   = getContext({ limit: 500, compact: false });

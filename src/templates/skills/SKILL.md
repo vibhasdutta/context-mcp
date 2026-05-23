@@ -89,9 +89,8 @@ Parses codebase into AST graph via tree-sitter. Extracts functions, classes, imp
 
 ### Query (free, instant, forever)
 ```
-codegraph_query(path, question)   → find functions, classes, files, dependencies, callers
-codegraph_explain(path, node)     → one node: type, file, depends_on, used_by
-codegraph_path(path, from, to)    → shortest path between two concepts
+codegraph_query(path, question?, node?)  → structural question OR single-node lookup (or both in one call)
+codegraph_path(path, from, to)           → shortest path between two concepts
 codegraph_nodes(path, type)       → list all nodes of a type
 codegraph_report(path)            → god nodes, clusters, surprises
 ```
