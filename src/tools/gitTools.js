@@ -26,10 +26,8 @@ function autoDetectRoot(fromDir) {
 }
 
 function resolveCwd(args, state) {
-  // Auto-detect project root on first use if not already configured.
   if (!state.projectRootPath) {
-    const detected = autoDetectRoot(args.cwd ? pathResolve(args.cwd) : process.cwd());
-    state.projectRootPath = detected || process.cwd();
+    throw new Error('No project root configured. Call context.resume with rootPath before using git tools.');
   }
   const raw = args.cwd ? pathResolve(args.cwd) : state.projectRootPath;
   return guardPath(raw, state.projectRootPath);

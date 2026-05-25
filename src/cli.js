@@ -163,17 +163,20 @@ function cmdList(args) {
 
   printSection('Context', filterProject ? `project: ${filterProject}` : 'all projects');
 
-  // Build per-project map
+  // Build per-project map, split entries into their three trees
   const projects = {};
+  const ensureProj = p => {
+    if (!projects[p]) projects[p] = { context: [], summary: [], plans: [] };
+    return projects[p];
+  };
   for (const entry of entries) {
     const p = entry.project || 'global';
-    if (!projects[p]) projects[p] = { contexts: [], discussions: [] };
-    projects[p].contexts.push(entry);
+    const d = ensureProj(p);
+    if (entry.type === 'compaction') d.summary.push(entry);
+    else d.context.push(entry);
   }
   for (const disc of allDiscussions) {
-    const p = disc.project || 'global';
-    if (!projects[p]) projects[p] = { contexts: [], discussions: [] };
-    projects[p].discussions.push(disc);
+    ensureProj(disc.project || 'global').plans.push(disc);
   }
 
   const projectNames = Object.keys(projects).sort();
@@ -185,73 +188,82 @@ function cmdList(args) {
   }
 
   for (const projectName of projectNames) {
-    const pData     = projects[projectName];
-    const graph     = _graphForProject(allGraphs, projectName);
-    const activeD   = pData.discussions.filter(d => d.status === 'active').length;
-    const totalSecs = (pData.contexts.length > 0 ? 1 : 0) + (pData.discussions.length > 0 ? 1 : 0) + (graph ? 1 : 0);
-    let   secIdx    = 0;
+    const pData        = projects[projectName];
+    const graphBuild   = _graphForProject(allGraphs, projectName);
+    const totalEntries = pData.context.length + pData.summary.length;
+    const activePlans  = pData.plans.filter(p => p.status === 'active').length;
+    const sections     = [
+      graphBuild               && 'graph',
+      pData.context.length     && 'context',
+      pData.summary.length     && 'summary',
+      pData.plans.length       && 'plans',
+    ].filter(Boolean);
+    let secIdx = 0;
 
-    const projReg  = projectRegistry.get(projectName);
+    const projReg   = projectRegistry.get(projectName);
     const projIdStr = projReg?.id ? faint('  id:' + projReg.id.slice(0, 8)) : '';
-    console.log(`\n  ${color(C.dblue, '◆')} ${bold(lblue(projectName))}${projIdStr}  ${faint(`${pData.contexts.length} entries · ${pData.discussions.length} discussions`)}${activeD ? `  ${warn('● ' + activeD + ' active')}` : ''}`);
+    console.log(`\n  ${color(C.dblue, '◆')} ${bold(lblue(projectName))}${projIdStr}  ${faint(`${totalEntries} entries · ${pData.plans.length} plans`)}${activePlans ? `  ${warn('● ' + activePlans + ' active')}` : ''}`);
     console.log(`  ${color(C.darkgray, '│')}`);
 
-    // ── Graph ────────────────────────────────────────────────────────────────
-    if (graph) {
-      secIdx++;
-      const isLast  = secIdx === totalSecs;
-      const builtAt = (graph.builtAt || '').slice(0, 10);
-      console.log(`  ${color(C.darkgray, isLast ? '└─' : '├─')} ${accent('⬡')} ${muted('graph')}  ${faint(`${graph.nodes}n · ${graph.edges}e · ${graph.communities} clusters · ${builtAt}`)}`);
-      if (!isLast) console.log(`  ${color(C.darkgray, '│')}`);
-    }
-
-    // ── Context entries ───────────────────────────────────────────────────────
-    if (pData.contexts.length) {
-      secIdx++;
-      const isLast = secIdx === totalSecs;
-      console.log(`  ${color(C.darkgray, isLast ? '└─' : '├─')} ${muted('memory')}  ${faint(pData.contexts.length + ' entries')}`);
-      pData.contexts.forEach((item, i) => {
-        const br   = i === pData.contexts.length - 1 ? '└─' : '├─';
+    const renderEntries = (items, label, secIsLast) => {
+      console.log(`  ${color(C.darkgray, secIsLast ? '└─' : '├─')} ${muted(label)}  ${faint(items.length + ' entries')}`);
+      items.forEach((item, i) => {
+        const br   = i === items.length - 1 ? '└─' : '├─';
         const date = (item.createdAt || '').slice(0, 10);
-        const type = item.type || 'note';
         const id   = item.id.slice(0, 8);
         const tags = safeTags(item.tags);
-        const pipe = isLast ? ' ' : '│';
-        console.log(`  ${color(C.darkgray, pipe)}  ${color(C.darkgray, br)} ${pill(type)}  ${bold(item.title || '(no title)')}  ${faint('id:' + id)}  ${faint(date)}`);
+        const pipe = secIsLast ? ' ' : '│';
+        console.log(`  ${color(C.darkgray, pipe)}  ${color(C.darkgray, br)} ${pill(item.type || 'note')}  ${bold(item.title || '(no title)')}  ${faint('id:' + id)}  ${faint(date)}`);
         if (tags.length) console.log(`  ${color(C.darkgray, pipe)}     ${faint(tags.map(t => '#' + t).join(' '))}`);
+      });
+      if (!secIsLast) console.log(`  ${color(C.darkgray, '│')}`);
+    };
+
+    // ── Graph (build stats only) ──────────────────────────────────────────────
+    if (graphBuild) {
+      secIdx++;
+      const isLast  = secIdx === sections.length;
+      const builtAt = (graphBuild.builtAt || '').slice(0, 10);
+      console.log(`  ${color(C.darkgray, isLast ? '└─' : '├─')} ${accent('⬡')} ${muted('graph')}  ${faint(`${graphBuild.nodes}n · ${graphBuild.edges}e · ${graphBuild.communities} clusters · ${builtAt}`)}`);
+      if (!isLast) console.log(`  ${color(C.darkgray, '│')}`);
+    }
+
+    // ── Context ───────────────────────────────────────────────────────────────
+    if (pData.context.length) {
+      secIdx++;
+      renderEntries(pData.context, 'context', secIdx === sections.length);
+    }
+
+    // ── Summary (compaction digests only — no type labels) ───────────────────
+    if (pData.summary.length) {
+      secIdx++;
+      const isLast = secIdx === sections.length;
+      console.log(`  ${color(C.darkgray, isLast ? '└─' : '├─')} ${muted('summary')}  ${faint(pData.summary.length + ' compactions')}`);
+      pData.summary.forEach((item, i) => {
+        const br   = i === pData.summary.length - 1 ? '└─' : '├─';
+        const date = (item.createdAt || '').slice(0, 10);
+        const pipe = isLast ? ' ' : '│';
+        console.log(`  ${color(C.darkgray, pipe)}  ${color(C.darkgray, br)} ${faint('◎')} ${bold(item.title || '(compaction)')}  ${faint(date)}`);
       });
       if (!isLast) console.log(`  ${color(C.darkgray, '│')}`);
     }
 
-    // ── Discussions ───────────────────────────────────────────────────────────
-    if (pData.discussions.length) {
+    // ── Plans ─────────────────────────────────────────────────────────────────
+    if (pData.plans.length) {
       secIdx++;
-      const isLast = secIdx === totalSecs;
-      console.log(`  ${color(C.darkgray, isLast ? '└─' : '├─')} ${muted('discussions')}  ${faint(pData.discussions.length + ' total')}`);
-      pData.discussions.forEach((disc, i) => {
-        const br    = i === pData.discussions.length - 1 ? '└─' : '├─';
-        const sc    = disc.status === 'done' ? 'green' : 'tcyan';
-        const steps = disc.stepsSummary?.total ? faint(` ${disc.stepsSummary.done}/${disc.stepsSummary.total}`) : '';
-        const pipe  = isLast ? ' ' : '│';
-        console.log(`  ${color(C.darkgray, pipe)}  ${color(C.darkgray, br)} ${warn(disc.status === 'active' ? '●' : '○')} ${bold(disc.name)}  ${pill(disc.status, sc)}  ${faint(disc.type || 'plan')}${steps}`);
-        if (disc.description) console.log(`  ${color(C.darkgray, pipe)}     ${faint(disc.description)}`);
+      const isLast = secIdx === sections.length;
+      console.log(`  ${color(C.darkgray, isLast ? '└─' : '├─')} ${muted('plans')}  ${faint(pData.plans.length + ' total')}`);
+      pData.plans.forEach((plan, i) => {
+        const br   = i === pData.plans.length - 1 ? '└─' : '├─';
+        const pipe = isLast ? ' ' : '│';
+        console.log(`  ${color(C.darkgray, pipe)}  ${color(C.darkgray, br)} ${warn(plan.status === 'active' ? '●' : '○')} ${bold(plan.name)}  ${pill(plan.status, plan.status === 'done' ? 'green' : 'tcyan')}  ${faint((plan.description || '').slice(0, 60))}`);
       });
-    }
-  }
-
-  // Orphan graphs (no matching project)
-  const orphanGraphs = allGraphs.filter(g => !projectNames.some(p => _graphForProject([g], p)));
-  if (orphanGraphs.length) {
-    console.log(`\n  ${color(C.dblue, '◇')} ${muted('other graphs')}`);
-    for (const g of orphanGraphs) {
-      const pathShort = g.path.replace(/\\/g, '/').split('/').slice(-2).join('/');
-      console.log(`    ${accent('⬡')} ${bold(pathShort)}  ${faint(`${g.nodes}n · ${g.edges}e · ${g.communities} clusters`)}`);
     }
   }
 
   console.log('');
   console.log(line());
-  console.log(faint(`  ${entries.length} entries  ·  ${allDiscussions.length} discussions  ·  ${allGraphs.length} graphs  ·  ${projectNames.length} projects`));
+  console.log(faint(`  ${entries.length} entries  ·  ${allDiscussions.length} plans  ·  ${allGraphs.length} graphs  ·  ${projectNames.length} projects`));
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────

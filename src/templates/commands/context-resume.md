@@ -4,7 +4,7 @@ Both `project` and `rootPath` are required: `project` names the memory bucket, `
 
 This loads:
 - Recent decisions, bugs, and notes from past sessions
-- Active discussions
+- Active plans
 - ContextGraph status (built or not)
 
 If `codegraph.built` is false in the response, immediately call `codegraph_build` on the project path before proceeding.

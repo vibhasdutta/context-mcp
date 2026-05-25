@@ -25,8 +25,8 @@ This gets worse as projects grow — reading 20 files to answer "what calls this
 
 ## What It Solves
 
-- **Persistent memory** — decisions, bugs, notes, and architecture saved across sessions, loaded automatically at conversation start
-- **Shared store** — `~/.context-mcp/` is one place on your machine; all AI tools read and write it
+- **Persistent memory** — decisions, bugs, notes, and config saved across sessions, loaded automatically at conversation start
+- **Shared store** — `~/.context-mcp/projects/<name>/` per-project on your machine; all AI tools read and write it
 - **ContextGraph** — build a knowledge graph of your codebase once, answer structural questions in ~500 tokens instead of ~50,000
 
 Real measured reduction on this project: **162× fewer tokens**, **99.38% reduction** per conversation.
@@ -95,10 +95,10 @@ ctx online --port 3200   # different port
 Both `ctx` and `context` are aliases for the same CLI.
 
 ```bash
-ctx                            # interactive mode (UI — no "ctx" prefix inside)
+ctx                            # interactive mode (UI)
 
 # Context
-ctx list [project]             # list entries, discussions, graphs
+ctx list [project]             # list entries by tree: graph / context / summary / plans
 ctx projects                   # all projects with graph status + recent entries
 ctx search "query"             # keyword → semantic fallback search
 ctx add                        # add entry interactively
@@ -115,7 +115,6 @@ ctx settings                   # view and edit config interactively
 
 # Tools
 ctx benchmark                  # token savings report (memory + graph)
-ctx discuss [project]          # view discussions
 ```
 
 ---
@@ -136,12 +135,12 @@ Any file or git operation outside that directory is rejected. Applies to all HTT
 
 ### Memory
 
-- `context.resume` — loads recent entries, discussions, and graph status; registers `rootPath` for sandboxing
-- `context.save` — store decisions, bugs, notes, architecture with type tags
-- `context.get` / `context.update` / `context.delete` — full CRUD
+- `context.resume` — loads recent entries, active plans, and graph status; registers `rootPath` for sandboxing
+- `context.save` — store context with 4 types: `decision`, `bug`, `note`, `config`
+- `context.get` / `context.update` / `context.delete` — full CRUD, single or batch
 - `search` — keyword-first, semantic fallback
-- `discussion` — threaded plans with steps and cross-session continuity
-- Auto-deduplication on save; auto-compact at 20 entries
+- `plan` — auto-triggered when AI makes any plan; saves a markdown summary to a `planDir` you specify
+- Auto-deduplication on save; auto-compact at 20 entries → stored in `summary.json`
 
 ### ContextGraph
 
@@ -153,7 +152,7 @@ Any file or git operation outside that directory is rejected. Applies to all HTT
 codegraph_build(path)
 ```
 
-Parses codebase via tree-sitter AST (16 languages, regex fallback). Extracts functions, classes, imports, call edges. Saved to `~/.context-mcp/`.
+Parses codebase via tree-sitter AST (16 languages, regex fallback). Extracts functions, classes, imports, call edges. Build metadata saved to `~/.context-mcp/projects/<name>/graph.json`.
 
 **Step 2 — Query** (instant, forever):
 

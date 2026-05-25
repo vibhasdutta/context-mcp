@@ -5,7 +5,7 @@ import { getConfig } from './config.js';
 
 import * as contextTool    from './tools/context.js';
 import * as searchTool     from './tools/search.js';
-import * as discussionTool from './tools/discussion.js';
+import * as planTool        from './tools/plan.js';
 import * as errorCheckTool from './tools/errorCheck.js';
 import * as fileTool       from './tools/fileTools.js';
 import * as gitTool        from './tools/gitTools.js';
@@ -17,8 +17,9 @@ const CODEGRAPH_TOOL_NAMES = codegraphTool.TOOL_NAMES;
 
 export function createServer({ enableFileTools = false, enableGitTools = getConfig().access_git === true } = {}) {
   const state = {
-    sessionProject: null,
-    discussionId:   null,
+    sessionProject:  null,
+    discussionId:    null,
+    projectRootPath: null,
   };
 
   const server = new Server(
@@ -30,7 +31,7 @@ export function createServer({ enableFileTools = false, enableGitTools = getConf
     const tools = [
       contextTool.definition,
       searchTool.definition,
-      discussionTool.definition,
+      planTool.definition,
       errorCheckTool.definition,
     ];
     if (enableFileTools) tools.push(...fileTool.definitions);
@@ -56,8 +57,8 @@ export function createServer({ enableFileTools = false, enableGitTools = getConf
         result = await contextTool.handle(args, state);
       } else if (name === searchTool.definition.name) {
         result = await searchTool.handle(args, state);
-      } else if (name === discussionTool.definition.name) {
-        result = await discussionTool.handle(args, state);
+      } else if (name === planTool.definition.name) {
+        result = await planTool.handle(args, state);
       } else if (name === errorCheckTool.definition.name) {
         result = await errorCheckTool.handle(args, state);
       } else if (FILE_TOOL_NAMES.has(name)) {

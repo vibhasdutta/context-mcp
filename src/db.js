@@ -1,37 +1,56 @@
 /**
- * db.js — optimized JSON store for context-mcp
+ * db.js — per-project directory store for context-mcp
  *
- * Performance optimizations:
- *   1. In-memory cache — disk is read once, all ops hit RAM
- *   2. Debounced writes — batches rapid saves into one disk write
- *   3. Compact mode — returns previews instead of full content (saves tokens)
- *   4. Content size cap — prevents bloated entries
- *   5. Flush-on-exit — guarantees data is written before process dies
+ * Layout:
+ *   ~/.context-mcp/
+ *   ├── projects.json          ← master index
+ *   └── projects/
+ *       └── <slug>/
+ *           ├── context.json   ← decision, bug, note, code, config, error
+ *           ├── graph.json     ← { build: {...}, entries: [...architecture...] }
+ *           ├── summary.json   ← summary type + archived entries
+ *           └── discussions.json
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, openSync, closeSync, unlinkSync, renameSync, chmodSync } from 'node:fs';
+import {
+  readFileSync, writeFileSync, mkdirSync, existsSync,
+  openSync, closeSync, unlinkSync, renameSync, chmodSync, rmdirSync,
+} from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { runMigration } from './migrator.js';
 
-const DATA_DIR          = process.env.CONTEXT_MCP_DIR || join(homedir(), '.context-mcp');
-const CONTEXTS_PATH     = join(DATA_DIR, 'contexts.json');
-const DISCUSSIONS_PATH  = join(DATA_DIR, 'discussions.json');
-const GRAPHS_PATH       = join(DATA_DIR, 'graphs.json');
-const PROJECTS_PATH     = join(DATA_DIR, 'projects.json');
+const DATA_DIR     = process.env.CONTEXT_MCP_DIR || join(homedir(), '.context-mcp');
+const PROJECTS_DIR = join(DATA_DIR, 'projects');
+const PROJECTS_PATH = join(DATA_DIR, 'projects.json');
 
 
 const MAX_CONTENT_LENGTH = 5000;
-const PREVIEW_LENGTH = 200;
-
-// Normalize file paths for cross-platform comparison (Windows case + slash variants)
-function normPath(p) {
-  return p ? p.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : '';
-}
-const WRITE_DEBOUNCE_MS = 500;
+const PREVIEW_LENGTH     = 200;
+const WRITE_DEBOUNCE_MS  = 500;
 const LOCK_WAIT_TIMEOUT_MS = 2000;
 
 const _isWin = platform() === 'win32';
+
+function normPath(p) {
+  return p ? p.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : '';
+}
+
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+}
+
+function projectDataDir(name)    { return join(PROJECTS_DIR, slugify(name)); }
+function contextFilePath(name)   { return join(projectDataDir(name), 'context.json'); }
+function graphFilePath(name)     { return join(projectDataDir(name), 'graph.json'); }
+function summaryFilePath(name)   { return join(projectDataDir(name), 'summary.json'); }
+function discussFilePath(name)   { return join(projectDataDir(name), 'discussions.json'); }
+
+function treeFor(entry) {
+  if (entry.type === 'compaction') return 'summary';
+  return 'context';
+}
 
 function _secureFile(p) {
   if (_isWin) return;
@@ -42,122 +61,24 @@ if (!existsSync(DATA_DIR)) {
   mkdirSync(DATA_DIR, { recursive: true });
   if (!_isWin) { try { chmodSync(DATA_DIR, 0o700); } catch {} }
 }
+if (!existsSync(PROJECTS_DIR)) {
+  mkdirSync(PROJECTS_DIR, { recursive: true });
+}
 
 // ── In-memory cache ──────────────────────────────────────────────────────────
 
-let _cache = null;
+let _projectsIndex = null;     // array of { id, name, rootPath, createdAt, dataDir }
+let _projectsIndexDirty = false;
+let _projectData = new Map();  // name -> { context: [], graph: { build, entries: [] }, summary: [], discussions: [] }
+let _dirtyProjects = new Set();
 let _dirty = false;
 let _writeTimer = null;
 let _generation = 0;
-const _changedContextIds      = new Set();
-const _deletedContextIds      = new Set();
-const _changedDiscussionNames = new Set();
-const _changedGraphPaths      = new Set();
-const _changedProjectIds      = new Set();
+let _migrated = false;
 
+// ── File I/O helpers ─────────────────────────────────────────────────────────
 
-function _readCollection(path, key) {
-  if (!existsSync(path)) return [];
-  try {
-    const data = JSON.parse(readFileSync(path, 'utf8'));
-    return Array.isArray(data[key]) ? data[key] : (Array.isArray(data) ? data : []);
-  } catch { return []; }
-}
-
-function load() {
-  if (_cache) return _cache;
-  _cache = {
-    contexts:    _readCollection(CONTEXTS_PATH,    'contexts'),
-    discussions: _readCollection(DISCUSSIONS_PATH, 'discussions'),
-    graphs:      _readCollection(GRAPHS_PATH,      'graphs'),
-    projects:    _readCollection(PROJECTS_PATH,    'projects'),
-  };
-  return _cache;
-}
-
-function readStoreFromDisk() {
-  return {
-    contexts:    _readCollection(CONTEXTS_PATH,    'contexts'),
-    discussions: _readCollection(DISCUSSIONS_PATH, 'discussions'),
-    graphs:      _readCollection(GRAPHS_PATH,      'graphs'),
-    projects:    _readCollection(PROJECTS_PATH,    'projects'),
-  };
-}
-
-function refreshFromDisk() {
-  const latest = readStoreFromDisk();
-  _cache = mergeStore(latest, _cache || { contexts: [], discussions: [], graphs: [], projects: [] });
-}
-
-function normalizeTags(tags) {
-  if (Array.isArray(tags)) return tags;
-  if (typeof tags === 'string') return tags.split(',').map(t => t.trim()).filter(Boolean);
-  return [];
-}
-
-const VALID_SOURCES = new Set(['user', 'ai-summary', 'file', 'web', 'cli', 'auto']);
-function normalizeSource(s) {
-  return VALID_SOURCES.has(s) ? s : 'user';
-}
-
-const VALID_PRIORITIES = new Set(['low', 'normal', 'high', 'critical']);
-function normalizePriority(p) {
-  return VALID_PRIORITIES.has(p) ? p : 'normal';
-}
-
-// backward-compat: old data has relations as string[], new is {id, relType}[]
-function normalizeRelations(relations) {
-  if (!Array.isArray(relations)) return [];
-  return relations.map(r => {
-    if (typeof r === 'string') return { id: r, relType: 'relates-to' };
-    if (r && typeof r.id === 'string') return { id: r.id, relType: r.relType || 'relates-to' };
-    return null;
-  }).filter(Boolean);
-}
-
-
-function mergeStore(latest, local) {
-  const contextsById = new Map(
-    latest.contexts
-      .filter(c => !_deletedContextIds.has(c.id))
-      .map(c => [c.id, c])
-  );
-  for (const context of local.contexts) {
-    if (_changedContextIds.has(context.id)) contextsById.set(context.id, context);
-  }
-
-  const discussionsByName = new Map(latest.discussions.map(d => [d.name, d]));
-  for (const disc of local.discussions) {
-    if (_changedDiscussionNames.has(disc.name)) discussionsByName.set(disc.name, disc);
-  }
-
-  const graphsByPath = new Map((latest.graphs || []).map(g => [normPath(g.path), g]));
-  for (const graph of (local.graphs || [])) {
-    if (_changedGraphPaths.has(graph.path)) graphsByPath.set(normPath(graph.path), graph);
-  }
-
-  const projectsById = new Map((latest.projects || []).map(p => [p.id, p]));
-  for (const proj of (local.projects || [])) {
-    if (_changedProjectIds.has(proj.id)) projectsById.set(proj.id, proj);
-  }
-
-  return {
-    contexts:    [...contextsById.values()],
-    discussions: [...discussionsByName.values()],
-    graphs:      [...graphsByPath.values()],
-    projects:    [...projectsById.values()],
-  };
-}
-
-function markDirty() {
-  _dirty = true;
-  _generation++;
-  // Debounce: schedule a write after WRITE_DEBOUNCE_MS of no further mutations
-  if (_writeTimer) clearTimeout(_writeTimer);
-  _writeTimer = setTimeout(flushToDisk, WRITE_DEBOUNCE_MS);
-}
-
-function _flushCollection(filePath, key, data) {
+function _flushFile(filePath, content) {
   const lockPath = `${filePath}.lock`;
   const tmpPath  = `${filePath}.tmp`;
   let lockFd;
@@ -173,7 +94,7 @@ function _flushCollection(filePath, key, data) {
         const t = Date.now(); while (Date.now() - t < 10) {}
       }
     }
-    writeFileSync(tmpPath, JSON.stringify({ [key]: data }, null, 2), 'utf8');
+    writeFileSync(tmpPath, JSON.stringify(content, null, 2), 'utf8');
     _secureFile(tmpPath);
     renameSync(tmpPath, filePath);
     renamed = true;
@@ -183,38 +104,152 @@ function _flushCollection(filePath, key, data) {
   }
 }
 
+function _readArr(filePath, key) {
+  if (!existsSync(filePath)) return [];
+  try {
+    const d = JSON.parse(readFileSync(filePath, 'utf8'));
+    return Array.isArray(d[key]) ? d[key] : (Array.isArray(d) ? d : []);
+  } catch { return []; }
+}
+
+function _readObj(filePath, defaults) {
+  if (!existsSync(filePath)) return { ...defaults };
+  try { return { ...defaults, ...JSON.parse(readFileSync(filePath, 'utf8')) }; }
+  catch { return { ...defaults }; }
+}
+
+// ── Projects index ───────────────────────────────────────────────────────────
+
+function loadProjectsIndex() {
+  if (_projectsIndex) return _projectsIndex;
+  if (!existsSync(PROJECTS_PATH)) { _projectsIndex = []; return _projectsIndex; }
+  try {
+    const d = JSON.parse(readFileSync(PROJECTS_PATH, 'utf8'));
+    _projectsIndex = Array.isArray(d.projects) ? d.projects : [];
+  } catch { _projectsIndex = []; }
+  return _projectsIndex;
+}
+
+// ── Migration ─────────────────────────────────────────────────────────────────
+
+function migrate() {
+  if (_migrated) return;
+  _migrated = true;
+  runMigration({
+    dataDir:       DATA_DIR,
+    projectsDir:   PROJECTS_DIR,
+    projectsPath:  PROJECTS_PATH,
+    slugify,
+    flushFile:     _flushFile,
+    projectsIndex: loadProjectsIndex(),
+  });
+}
+
+// ── Per-project data loading ─────────────────────────────────────────────────
+
+function loadProjectData(name) {
+  if (_projectData.has(name)) return _projectData.get(name);
+  const dir = projectDataDir(name);
+  mkdirSync(dir, { recursive: true });
+  const data = {
+    context:     _readArr(contextFilePath(name), 'entries'),
+    graph:       _readObj(graphFilePath(name), { build: null }),
+    summary:     _readArr(summaryFilePath(name), 'entries'),
+    discussions: _readArr(discussFilePath(name), 'discussions'),
+  };
+  _projectData.set(name, data);
+  return data;
+}
+
+function getAllEntries(projectName) {
+  const data = loadProjectData(projectName);
+  return [...data.context, ...data.summary];
+}
+
+// Find an entry by ID, optionally scoped to a project.
+function findEntryById(id, projectHint) {
+  const search = (data) => {
+    for (const arr of [data.context, data.summary]) {
+      const e = arr.find(c => c.id === id);
+      if (e) return e;
+    }
+    return null;
+  };
+  if (projectHint) {
+    const e = search(loadProjectData(projectHint));
+    if (e) return { entry: e, projectName: projectHint };
+  }
+  for (const [name, data] of _projectData.entries()) {
+    if (name === projectHint) continue;
+    const e = search(data);
+    if (e) return { entry: e, projectName: name };
+  }
+  // Load all remaining projects
+  const idx = loadProjectsIndex();
+  for (const proj of idx) {
+    if (_projectData.has(proj.name) || proj.name === projectHint) continue;
+    const e = search(loadProjectData(proj.name));
+    if (e) return { entry: e, projectName: proj.name };
+  }
+  return null;
+}
+
+// Remove an entry from its array in the project data.
+function removeEntryFromData(data, entry) {
+  if (treeFor(entry) === 'summary') {
+    data.summary = data.summary.filter(e => e.id !== entry.id);
+  } else {
+    data.context = data.context.filter(e => e.id !== entry.id);
+  }
+}
+
+// ── Dirty tracking & flush ───────────────────────────────────────────────────
+
+function markDirty() {
+  _dirty = true;
+  _generation++;
+  if (_writeTimer) clearTimeout(_writeTimer);
+  _writeTimer = setTimeout(flushToDisk, WRITE_DEBOUNCE_MS);
+}
+
+function flushProjectToDisk(name) {
+  const data = _projectData.get(name);
+  if (!data) return;
+  const dir = projectDataDir(name);
+  mkdirSync(dir, { recursive: true });
+  _flushFile(contextFilePath(name),   { entries: data.context });
+  _flushFile(graphFilePath(name),     data.graph);
+  _flushFile(summaryFilePath(name),   { entries: data.summary });
+  _flushFile(discussFilePath(name),   { discussions: data.discussions });
+}
+
 function flushToDisk() {
-  if (!_dirty || !_cache) return;
+  if (!_dirty) return;
   _writeTimer = null;
 
-  const latest = readStoreFromDisk();
-  _cache = mergeStore(latest, _cache);
+  for (const name of _dirtyProjects) {
+    flushProjectToDisk(name);
+  }
+  _dirtyProjects.clear();
 
-  if (_changedContextIds.size > 0 || _deletedContextIds.size > 0) {
-    _flushCollection(CONTEXTS_PATH, 'contexts', _cache.contexts);
-    _changedContextIds.clear();
-    _deletedContextIds.clear();
-  }
-  if (_changedDiscussionNames.size > 0) {
-    _flushCollection(DISCUSSIONS_PATH, 'discussions', _cache.discussions);
-    _changedDiscussionNames.clear();
-  }
-  if (_changedGraphPaths.size > 0) {
-    _flushCollection(GRAPHS_PATH, 'graphs', _cache.graphs);
-    _changedGraphPaths.clear();
-  }
-  if (_changedProjectIds.size > 0) {
-    _flushCollection(PROJECTS_PATH, 'projects', _cache.projects);
-    _changedProjectIds.clear();
+  if (_projectsIndexDirty && _projectsIndex) {
+    _flushFile(PROJECTS_PATH, { projects: _projectsIndex });
+    _projectsIndexDirty = false;
   }
 
   _dirty = false;
 }
 
-// Flush on process exit to guarantee no data loss
 process.on('exit', flushToDisk);
-process.on('SIGINT', () => { flushToDisk(); process.exit(); });
+process.on('SIGINT',  () => { flushToDisk(); process.exit(); });
 process.on('SIGTERM', () => { flushToDisk(); process.exit(); });
+
+// ── Initialise: run migration lazily on first access ─────────────────────────
+
+function init() {
+  loadProjectsIndex();
+  migrate();
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -222,6 +257,15 @@ function truncate(text, max) {
   if (!text || text.length <= max) return text;
   return text.slice(0, max - 3) + '...';
 }
+
+function normalizeTags(tags) {
+  if (Array.isArray(tags)) return tags;
+  if (typeof tags === 'string') return tags.split(',').map(t => t.trim()).filter(Boolean);
+  return [];
+}
+
+const VALID_SOURCES = new Set(['user', 'ai-summary', 'file', 'web', 'cli', 'auto']);
+function normalizeSource(s) { return VALID_SOURCES.has(s) ? s : 'user'; }
 
 function compactEntry(e) {
   const compact = {
@@ -249,11 +293,11 @@ function compactEntry(e) {
 
 export function saveContext({ project, content, tags = [], source = 'user', title = '',
   type = 'note', status = 'active', files = [], codeRefs = [],
-  relations = [], sessionId = null, parentId = null, expiresAt = null }) {
-  refreshFromDisk();
-  const store = load();
+  sessionId = null, parentId = null, expiresAt = null, rootPath = null }) {
+  init();
   const projectName = project || 'global';
-  ensureProject(projectName);
+  ensureProject(projectName, rootPath || undefined);
+  const data = loadProjectData(projectName);
   const now = new Date().toISOString();
   const entry = {
     id: randomUUID(),
@@ -270,80 +314,131 @@ export function saveContext({ project, content, tags = [], source = 'user', titl
     source: normalizeSource(source),
     files: Array.isArray(files) ? files : [],
     codeRefs: Array.isArray(codeRefs) ? codeRefs : [],
-    relations: normalizeRelations(relations),
-    relatedBy: [],      // back-references written by addRelation()
-    discussionId: null, // set by linkContextToDiscussion()
+    discussionId: null,
     createdAt: now,
     updatedAt: null,
     expiresAt: expiresAt || null,
   };
-  store.contexts.push(entry);
-  _changedContextIds.add(entry.id);
+  const tree = treeFor(entry);
+  if (tree === 'graph') data.graph.entries.push(entry);
+  else if (tree === 'summary') data.summary.push(entry);
+  else data.context.push(entry);
+  _dirtyProjects.add(projectName);
   markDirty();
   return entry;
 }
 
-export function updateContext({ id, content, title, tags, type, status, files, codeRefs, relations, sessionId, parentId, expiresAt }) {
-  refreshFromDisk();
-  const store = load();
-  const entry = store.contexts.find(c => c.id === id);
-  if (!entry) return null;
-  if (content !== undefined) entry.content = truncate(content, MAX_CONTENT_LENGTH);
-  if (title !== undefined) entry.title = truncate(title, 60);
-  if (tags !== undefined) entry.tags = normalizeTags(tags);
-  if (type !== undefined) entry.type = type;
-  if (status !== undefined) entry.status = status;
-  if (files !== undefined) entry.files = Array.isArray(files) ? files : [];
-  if (codeRefs !== undefined) entry.codeRefs = Array.isArray(codeRefs) ? codeRefs : [];
-  if (relations !== undefined) entry.relations = normalizeRelations(relations);
+export function updateContext({ id, content, title, tags, type, status, files, codeRefs, sessionId, parentId, expiresAt }) {
+  init();
+  const found = findEntryById(id);
+  if (!found) return null;
+  const { entry, projectName } = found;
+  const data = loadProjectData(projectName);
+
+  const oldTree = treeFor(entry);
+  if (content   !== undefined) entry.content   = truncate(content, MAX_CONTENT_LENGTH);
+  if (title     !== undefined) entry.title     = truncate(title, 60);
+  if (tags      !== undefined) entry.tags      = normalizeTags(tags);
+  if (type      !== undefined) entry.type      = type;
+  if (status    !== undefined) entry.status    = status;
+  if (files     !== undefined) entry.files     = Array.isArray(files) ? files : [];
+  if (codeRefs  !== undefined) entry.codeRefs  = Array.isArray(codeRefs) ? codeRefs : [];
   if (expiresAt !== undefined) entry.expiresAt = expiresAt || null;
   if (sessionId !== undefined) entry.sessionId = sessionId || null;
-  if (parentId !== undefined) entry.parentId = parentId || entry.sessionId || `project:${entry.project || 'global'}`;
-  entry.version = (entry.version || 1) + 1;
+  if (parentId  !== undefined) entry.parentId  = parentId || entry.sessionId || `project:${entry.project || 'global'}`;
+  entry.version  = (entry.version || 1) + 1;
   entry.updatedAt = new Date().toISOString();
-  _changedContextIds.add(entry.id);
-  _deletedContextIds.delete(entry.id);
+
+  // Re-route if type/status changed tree membership
+  const newTree = treeFor(entry);
+  if (newTree !== oldTree) {
+    removeEntryFromData(data, entry);
+    // Re-add with updated tree
+    const tempEntry = { ...entry };
+    if (newTree === 'graph') data.graph.entries.push(tempEntry);
+    else if (newTree === 'summary') data.summary.push(tempEntry);
+    else data.context.push(tempEntry);
+  }
+
+  _dirtyProjects.add(projectName);
   markDirty();
   return entry;
 }
 
-/**
- * Get recent context entries.
- * @param {Object} opts
- * @param {boolean} opts.compact - If true, returns previews instead of full content (saves tokens)
- */
 export function getContext({ project, tags, limit = 20, compact = false, ids } = {}) {
-  refreshFromDisk();
-  const store = load();
-  let results = store.contexts;
+  init();
+
   if (ids && ids.length) {
     const idSet = new Set(ids);
-    results = results.filter(c => idSet.has(c.id));
-    return compact ? results.map(compactEntry) : results;
+    // Load all projects to find entries
+    const idx = loadProjectsIndex();
+    const all = [];
+    const loaded = new Set(_projectData.keys());
+    for (const proj of idx) loaded.add(proj.name);
+    for (const name of loaded) {
+      for (const e of getAllEntries(name)) {
+        if (idSet.has(e.id)) all.push(e);
+      }
+    }
+    return compact ? all.map(compactEntry) : all;
   }
-  if (project) results = results.filter(c => c.project === project || c.project === 'global');
+
+  let results;
+  if (project) {
+    const entries = getAllEntries(project);
+    const globalEntries = project !== 'global' ? getAllEntries('global') : [];
+    results = [...entries, ...globalEntries];
+  } else {
+    // No project filter: load all
+    const idx = loadProjectsIndex();
+    const all = [];
+    const seen = new Set(_projectData.keys());
+    for (const proj of idx) seen.add(proj.name);
+    for (const name of seen) {
+      all.push(...getAllEntries(name));
+    }
+    results = all;
+  }
+
   if (tags && tags.length) {
     const tagList = Array.isArray(tags) ? tags : tags.split(',').map(t => t.trim());
     results = results.filter(c => tagList.some(t => Array.isArray(c.tags) && c.tags.includes(t)));
   }
+
+  // Sort by createdAt ascending, then take last `limit`
+  results.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const sliced = results.slice(-limit).reverse();
   return compact ? sliced.map(compactEntry) : sliced;
 }
 
 export function getContextSince(since, project) {
-  refreshFromDisk();
-  const store = load();
-  let results = store.contexts;
-  if (project) results = results.filter(c => c.project === project || c.project === 'global');
+  init();
+  let results;
+  if (project) {
+    results = [...getAllEntries(project)];
+    if (project !== 'global') results.push(...getAllEntries('global'));
+  } else {
+    const idx = loadProjectsIndex();
+    results = [];
+    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    for (const name of seen) results.push(...getAllEntries(name));
+  }
   return results.filter(c => c.createdAt >= since);
 }
 
 export function searchContext({ query, project, limit = 10, compact = false }) {
-  refreshFromDisk();
-  const store = load();
+  init();
   const terms = query.toLowerCase().split(/\s+/);
-  let results = store.contexts;
-  if (project) results = results.filter(c => c.project === project || c.project === 'global');
+  let results;
+  if (project) {
+    results = [...getAllEntries(project)];
+    if (project !== 'global') results.push(...getAllEntries('global'));
+  } else {
+    const idx = loadProjectsIndex();
+    results = [];
+    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    for (const name of seen) results.push(...getAllEntries(name));
+  }
   const scored = results.map(c => {
     const haystack = `${c.title || ''} ${c.content || ''} ${(Array.isArray(c.tags) ? c.tags : []).join(' ')}`.toLowerCase();
     const score = terms.reduce((s, t) => s + (haystack.split(t).length - 1), 0);
@@ -354,119 +449,133 @@ export function searchContext({ query, project, limit = 10, compact = false }) {
 }
 
 export function deleteContext({ id, ids }) {
-  refreshFromDisk();
-  const store = load();
-  const before = store.contexts.length;
+  init();
   const idSet = new Set(ids && ids.length ? ids : (id ? [id] : []));
   if (!idSet.size) return { deleted: 0 };
-  const removed = store.contexts.filter(c => idSet.has(c.id));
-  store.contexts = store.contexts.filter(c => !idSet.has(c.id));
-  if (store.contexts.length < before) {
-    for (const entry of removed) {
-      _deletedContextIds.add(entry.id);
-      _changedContextIds.delete(entry.id);
-    }
-    markDirty();
+  let deleted = 0;
+  // Scan all loaded projects
+  const seen = new Set(_projectData.keys());
+  loadProjectsIndex().forEach(p => seen.add(p.name));
+  for (const name of seen) {
+    const data = loadProjectData(name);
+    const allEntries = getAllEntries(name);
+    const toRemove = allEntries.filter(e => idSet.has(e.id));
+    if (!toRemove.length) continue;
+    for (const entry of toRemove) removeEntryFromData(data, entry);
+    _dirtyProjects.add(name);
+    deleted += toRemove.length;
+    if (deleted >= idSet.size) break;
   }
-  return { deleted: before - store.contexts.length };
+  if (deleted > 0) markDirty();
+  return { deleted };
 }
 
 export function deleteProject(nameOrId) {
-  refreshFromDisk();
-  const store = load();
-  // Resolve name from ID if needed
-  const byId = store.projects.find(p => p.id === nameOrId);
+  init();
+  const idx = loadProjectsIndex();
+  const byId = idx.find(p => p.id === nameOrId);
   const projectName = byId ? byId.name : nameOrId;
 
-  const beforeCtx  = store.contexts.length;
-  const beforeDisc = store.discussions.length;
-  const removed = store.contexts.filter(c => c.project === projectName);
-  store.contexts     = store.contexts.filter(c => c.project !== projectName);
-  store.discussions  = store.discussions.filter(d => d.project !== projectName);
-  // Remove from project registry
-  const beforeProj = store.projects.length;
-  store.projects = store.projects.filter(p => p.name !== projectName);
-  for (const entry of removed) {
-    _deletedContextIds.add(entry.id);
-    _changedContextIds.delete(entry.id);
+  // Count before removing
+  const data = _projectData.get(projectName) || loadProjectData(projectName);
+  const ctxCount  = data.context.length + data.graph.entries.length + data.summary.length;
+  const discCount = data.discussions.length;
+
+  // Remove project directory from disk
+  const dir = projectDataDir(projectName);
+  if (existsSync(dir)) {
+    for (const file of ['context.json', 'graph.json', 'summary.json', 'discussions.json']) {
+      try { unlinkSync(join(dir, file)); } catch {}
+    }
+    try { rmdirSync(dir); } catch {}
   }
-  if (store.contexts.length < beforeCtx || store.discussions.length < beforeDisc || store.projects.length < beforeProj) {
-    if (store.projects.length < beforeProj && byId) _changedProjectIds.add(byId.id);
+
+  // Drop from cache
+  _projectData.delete(projectName);
+  _dirtyProjects.delete(projectName);
+
+  // Remove from index
+  const beforeProj = idx.length;
+  _projectsIndex = idx.filter(p => p.name !== projectName);
+  if (_projectsIndex.length !== beforeProj) {
+    _projectsIndexDirty = true;
     markDirty();
   }
-  return {
-    deletedEntries:      beforeCtx  - store.contexts.length,
-    deletedDiscussions:  beforeDisc - store.discussions.length,
-  };
+
+  return { deletedEntries: ctxCount, deletedDiscussions: discCount };
 }
 
 export function countContext(project) {
-  refreshFromDisk();
-  const store = load();
-  if (!project) return store.contexts.length;
-  return store.contexts.filter(c => c.project === project || c.project === 'global').length;
+  init();
+  if (!project) {
+    const idx = loadProjectsIndex();
+    let total = 0;
+    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    for (const name of seen) total += getAllEntries(name).length;
+    return total;
+  }
+  return getAllEntries(project).length;
 }
 
-// Ensure a project entity exists for this name; returns the project record.
-// If rootPath is provided and the project has no rootPath yet, it is stored.
 export function ensureProject(name, rootPath) {
   if (!name || name === 'global') return null;
-  const store = load();
-  let proj = store.projects.find(p => p.name === name);
+  const idx = loadProjectsIndex();
+  let proj = idx.find(p => p.name === name);
   if (!proj) {
-    proj = { id: randomUUID(), name, createdAt: new Date().toISOString() };
-    store.projects.push(proj);
-    _changedProjectIds.add(proj.id);
+    proj = {
+      id: randomUUID(),
+      name,
+      createdAt: new Date().toISOString(),
+      dataDir: `projects/${slugify(name)}`,
+    };
+    idx.push(proj);
+    _projectsIndexDirty = true;
     markDirty();
   }
   if (rootPath && !proj.rootPath) {
     proj.rootPath = rootPath;
-    _changedProjectIds.add(proj.id);
+    if (!proj.dataDir) proj.dataDir = `projects/${slugify(name)}`;
+    _projectsIndexDirty = true;
     markDirty();
   }
   return proj;
 }
 
-// Returns the stored rootPath for a project, or null if not set.
 export function getProjectRoot(name) {
   if (!name || name === 'global') return null;
-  const store = load();
-  return store.projects.find(p => p.name === name)?.rootPath || null;
+  init();
+  return loadProjectsIndex().find(p => p.name === name)?.rootPath || null;
 }
 
 export function listProjects() {
-  refreshFromDisk();
-  const store = load();
-  // Count entries per project name
-  const counts = {};
-  for (const c of store.contexts) {
-    counts[c.project] = (counts[c.project] || 0) + 1;
-  }
-  // Merge with project registry (provides stable IDs); backfill any missing
-  const registered = new Map(store.projects.map(p => [p.name, p]));
-  for (const name of Object.keys(counts)) {
-    if (!registered.has(name)) ensureProject(name); // auto-register legacy projects
-  }
-  // Re-read after potential backfill
-  const reg = new Map(store.projects.map(p => [p.name, p]));
-  return Object.entries(counts).map(([name, count]) => ({
-    id:        reg.get(name)?.id || null,
-    name,
-    count,
-    createdAt: reg.get(name)?.createdAt || null,
-  })); // only show projects that have entries
+  init();
+  const idx = loadProjectsIndex();
+  // Load all known project dirs to get entry counts
+  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  return [...seen]
+    .map(name => {
+      const count = getAllEntries(name).length;
+      const reg = idx.find(p => p.name === name);
+      if (!reg && count === 0) return null;
+      return {
+        id:        reg?.id        || null,
+        name,
+        count,
+        createdAt: reg?.createdAt || null,
+        rootPath:  reg?.rootPath  || null,
+      };
+    })
+    .filter(p => p && p.count > 0);
 }
 
 // ── Auto-dedup ───────────────────────────────────────────────────────────────
 
 export function findDuplicate(content, project) {
-  refreshFromDisk();
+  init();
   const existing = getContext({ project, limit: 50 });
   if (!existing.length) return null;
-
   const newWords = new Set(content.toLowerCase().split(/\s+/).filter(w => w.length > 3));
   if (!newWords.size) return null;
-
   for (const entry of existing) {
     const oldWords = new Set((entry.content || '').toLowerCase().split(/\s+/).filter(w => w.length > 3));
     if (!oldWords.size) continue;
@@ -479,48 +588,41 @@ export function findDuplicate(content, project) {
 
 // ── Discussions ───────────────────────────────────────────────────────────────
 
-const VALID_DISCUSSION_TYPES   = new Set(['plan','research','idea','design','implementation','review','thread']);
+const VALID_DISCUSSION_TYPES    = new Set(['plan','research','idea','design','implementation','review','thread']);
 const VALID_DISCUSSION_STATUSES = new Set(['active','done']);
 
 export function saveDiscussion({ name, title, description, content, project, tags,
-  type, status, steps,
-  linkedContextIds, parentId, sessionId }) {
-  refreshFromDisk();
-  const store = load();
-  const existing = store.discussions.findIndex(d => d.name === name);
+  type, status, steps, linkedContextIds, parentId, sessionId }) {
+  init();
+  const proj = project || 'global';
+  const data = loadProjectData(proj);
+  const existing = data.discussions.findIndex(d => d.name === name);
   const now = new Date().toISOString();
-  const prev = existing >= 0 ? store.discussions[existing] : null;
-
-  // When updating an existing discussion, only overwrite fields that were
-  // explicitly provided by the caller — preserve everything else from prev.
+  const prev = existing >= 0 ? data.discussions[existing] : null;
   const disc = {
     id:               prev?.id || randomUUID(),
     name,
-    project:          project          !== undefined ? (project || 'global')                            : (prev?.project          ?? 'global'),
-    sessionId:        sessionId        !== undefined ? (sessionId || null)                              : (prev?.sessionId        ?? null),
-    parentId:         parentId         !== undefined ? (parentId || null)                               : (prev?.parentId         ?? null),
-    title:            title            !== undefined ? truncate(title || name, 80)                      : (prev?.title            ?? name),
-    description:      description      !== undefined ? (description || '')                              : (prev?.description      ?? ''),
-    content:          content          !== undefined ? truncate(content || '', MAX_CONTENT_LENGTH)       : (prev?.content          ?? ''),
-    type:             type             !== undefined ? (VALID_DISCUSSION_TYPES.has(type) ? type : 'plan'): (prev?.type             ?? 'plan'),
+    project:          project          !== undefined ? (project || 'global')                              : (prev?.project          ?? 'global'),
+    sessionId:        sessionId        !== undefined ? (sessionId || null)                                : (prev?.sessionId        ?? null),
+    parentId:         parentId         !== undefined ? (parentId || null)                                 : (prev?.parentId         ?? null),
+    title:            title            !== undefined ? truncate(title || name, 80)                        : (prev?.title            ?? name),
+    description:      description      !== undefined ? (description || '')                                : (prev?.description      ?? ''),
+    content:          content          !== undefined ? truncate(content || '', MAX_CONTENT_LENGTH)         : (prev?.content          ?? ''),
+    type:             type             !== undefined ? (VALID_DISCUSSION_TYPES.has(type) ? type : 'plan')  : (prev?.type             ?? 'plan'),
     status:           status           !== undefined ? (VALID_DISCUSSION_STATUSES.has(status) ? status : 'active') : (prev?.status  ?? 'active'),
-    tags:             tags             !== undefined ? normalizeTags(tags)                              : (prev?.tags             ?? []),
-    // For steps: if caller passed steps[], re-normalize them but preserve any
-    // per-step fields (linkedContextIds, completedAt) that already exist on prev.
-    steps:            steps            !== undefined ? mergeSteps(prev?.steps ?? [], steps)             : (prev?.steps            ?? []),
+    tags:             tags             !== undefined ? normalizeTags(tags)                                : (prev?.tags             ?? []),
+    steps:            steps            !== undefined ? mergeSteps(prev?.steps ?? [], steps)               : (prev?.steps            ?? []),
     linkedContextIds: linkedContextIds !== undefined ? (Array.isArray(linkedContextIds) ? linkedContextIds : []) : (prev?.linkedContextIds ?? []),
     createdAt:        prev?.createdAt || now,
     updatedAt:        now,
   };
-  if (existing >= 0) store.discussions[existing] = disc;
-  else store.discussions.push(disc);
-  _changedDiscussionNames.add(disc.name);
+  if (existing >= 0) data.discussions[existing] = disc;
+  else data.discussions.push(disc);
+  _dirtyProjects.add(proj);
   markDirty();
   return disc;
 }
 
-// Merge incoming steps[] with the existing steps[], preserving runtime state
-// (linkedContextIds, completedAt) for steps that already exist by id or order.
 function mergeSteps(prevSteps, incomingSteps) {
   if (!Array.isArray(incomingSteps) || incomingSteps.length === 0) return prevSteps;
   return incomingSteps.map((s, i) => {
@@ -538,11 +640,16 @@ function mergeSteps(prevSteps, incomingSteps) {
 }
 
 export function updateDiscussion({ id, name, title, description, content, status, type, tags, steps, linkedContextIds, parentId, sessionId }) {
-  refreshFromDisk();
-  const store = load();
-  const disc = id
-    ? store.discussions.find(d => d.id === id)
-    : store.discussions.find(d => d.name === name);
+  init();
+  let disc = null;
+  let projName = null;
+  const idx = loadProjectsIndex();
+  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  for (const pName of seen) {
+    const d = loadProjectData(pName);
+    const found = id ? d.discussions.find(x => x.id === id) : d.discussions.find(x => x.name === name);
+    if (found) { disc = found; projName = pName; break; }
+  }
   if (!disc) return null;
   if (title       !== undefined) disc.title       = truncate(title || disc.name, 80);
   if (description !== undefined) disc.description = description || '';
@@ -555,28 +662,44 @@ export function updateDiscussion({ id, name, title, description, content, status
   if (parentId    !== undefined) disc.parentId    = parentId || null;
   if (sessionId   !== undefined) disc.sessionId   = sessionId || null;
   disc.updatedAt = new Date().toISOString();
-  _changedDiscussionNames.add(disc.name);
+  _dirtyProjects.add(projName);
   markDirty();
   return disc;
 }
+
 export function getDiscussion({ project, name, id } = {}) {
-  refreshFromDisk();
-  const store = load();
-  let list = store.discussions;
-  if (project) list = list.filter(d => d.project === project || d.project === 'global');
-  if (id)   return list.find(d => d.id   === id)   || null;
-  if (name) return list.find(d => d.name === name) || null;
+  init();
+  if (project) {
+    const data = loadProjectData(project);
+    let list = data.discussions;
+    if (id)   return list.find(d => d.id   === id)   || null;
+    if (name) return list.find(d => d.name === name) || null;
+    return null;
+  }
+  // Search all
+  const idx = loadProjectsIndex();
+  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  for (const pName of seen) {
+    const d = loadProjectData(pName);
+    const found = id ? d.discussions.find(x => x.id === id) : d.discussions.find(x => x.name === name);
+    if (found) return found;
+  }
   return null;
 }
 
 export function listDiscussions({ project, status, type } = {}) {
-  refreshFromDisk();
-  const store = load();
-  let list = store.discussions;
-  if (project) list = list.filter(d => d.project === project || d.project === 'global');
-  if (status)  list = list.filter(d => d.status === status);
-  if (type)    list = list.filter(d => d.type === type);
-  // Return without full content — just header + stepsSummary
+  init();
+  let list = [];
+  if (project) {
+    list = loadProjectData(project).discussions;
+    if (project !== 'global') list = [...list, ...loadProjectData('global').discussions];
+  } else {
+    const idx = loadProjectsIndex();
+    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    for (const pName of seen) list.push(...loadProjectData(pName).discussions);
+  }
+  if (status) list = list.filter(d => d.status === status);
+  if (type)   list = list.filter(d => d.type   === type);
   return list.map(({ content: _, steps, ...rest }) => ({
     ...rest,
     stepsSummary: {
@@ -588,97 +711,98 @@ export function listDiscussions({ project, status, type } = {}) {
 }
 
 export function linkContextToDiscussion({ discussionId, discussionName, contextId }) {
-  refreshFromDisk();
-  const store = load();
-  const disc = discussionId
-    ? store.discussions.find(d => d.id   === discussionId)
-    : store.discussions.find(d => d.name === discussionName);
+  init();
+  // Find discussion across projects
+  let disc = null;
+  let discProject = null;
+  const idx = loadProjectsIndex();
+  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  for (const pName of seen) {
+    const d = loadProjectData(pName);
+    const found = discussionId
+      ? d.discussions.find(x => x.id   === discussionId)
+      : d.discussions.find(x => x.name === discussionName);
+    if (found) { disc = found; discProject = pName; break; }
+  }
   if (!disc) return null;
+
   if (!Array.isArray(disc.linkedContextIds)) disc.linkedContextIds = [];
   let changed = false;
   if (!disc.linkedContextIds.includes(contextId)) {
     disc.linkedContextIds.push(contextId);
     disc.updatedAt = new Date().toISOString();
-    _changedDiscussionNames.add(disc.name);
+    _dirtyProjects.add(discProject);
     changed = true;
   }
-  // write discussionId back onto the context entry
-  const entry = store.contexts.find(c => c.id === contextId);
-  if (entry && entry.discussionId !== disc.id) {
-    entry.discussionId = disc.id;
-    entry.updatedAt = new Date().toISOString();
-    _changedContextIds.add(entry.id);
+
+  // Write discussionId back onto the context entry
+  const found = findEntryById(contextId);
+  if (found && found.entry.discussionId !== disc.id) {
+    found.entry.discussionId = disc.id;
+    found.entry.updatedAt = new Date().toISOString();
+    _dirtyProjects.add(found.projectName);
     changed = true;
   }
   if (changed) markDirty();
   return { discussionId: disc.id, contextId };
 }
 
-export function addRelation({ fromId, toId, relType = 'relates-to' }) {
-  refreshFromDisk();
-  const store = load();
-  const from = store.contexts.find(c => c.id === fromId);
-  const to   = store.contexts.find(c => c.id === toId);
-  if (!from || !to) return null;
-  if (!Array.isArray(from.relations)) from.relations = [];
-  if (!Array.isArray(to.relatedBy))   to.relatedBy   = [];
-  if (!from.relations.find(r => r.id === toId)) {
-    from.relations.push({ id: toId, relType });
-    from.updatedAt = new Date().toISOString();
-    _changedContextIds.add(from.id);
-  }
-  if (!to.relatedBy.find(r => r.id === fromId)) {
-    to.relatedBy.push({ id: fromId, relType });
-    to.updatedAt = new Date().toISOString();
-    _changedContextIds.add(to.id);
-  }
-  markDirty();
-  return { fromId, toId, relType };
-}
-
 export function getContextByDiscussion(discussionId) {
-  refreshFromDisk();
-  const store = load();
-  return store.contexts.filter(c => c.discussionId === discussionId);
+  init();
+  const idx = loadProjectsIndex();
+  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  const results = [];
+  for (const name of seen) {
+    results.push(...getAllEntries(name).filter(c => c.discussionId === discussionId));
+  }
+  return results;
 }
 
 export function clearDiscussionLink(contextId) {
-  refreshFromDisk();
-  const store = load();
-  const entry = store.contexts.find(c => c.id === contextId);
-  if (!entry) return null;
-  entry.discussionId = null;
-  entry.updatedAt = new Date().toISOString();
-  _changedContextIds.add(entry.id);
+  init();
+  const found = findEntryById(contextId);
+  if (!found) return null;
+  found.entry.discussionId = null;
+  found.entry.updatedAt = new Date().toISOString();
+  _dirtyProjects.add(found.projectName);
   markDirty();
-  return entry;
+  return found.entry;
 }
 
 export function deleteDiscussion({ name, id }) {
-  refreshFromDisk();
-  const store = load();
-  const before = store.discussions.length;
-  // Find the discussion first so we can clean up _changedDiscussionNames regardless of
-  // whether it was matched by name or id.
-  const toDelete = store.discussions.find(d => (id && d.id === id) || (name && d.name === name));
-  store.discussions = store.discussions.filter(d => {
-    if (id)   return d.id   !== id;
-    if (name) return d.name !== name;
-    return true;
-  });
-  if (store.discussions.length < before) {
-    if (toDelete) _changedDiscussionNames.delete(toDelete.name);
-    markDirty();
+  init();
+  const idx = loadProjectsIndex();
+  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  for (const pName of seen) {
+    const data = loadProjectData(pName);
+    const before = data.discussions.length;
+    data.discussions = data.discussions.filter(d => {
+      if (id)   return d.id   !== id;
+      if (name) return d.name !== name;
+      return true;
+    });
+    if (data.discussions.length < before) {
+      _dirtyProjects.add(pName);
+      markDirty();
+      return { deleted: before - data.discussions.length };
+    }
   }
-  return { deleted: before - store.discussions.length };
+  return { deleted: 0 };
 }
 
 export function updateDiscussionStep({ discussionName, discussionId, stepId, status, linkedContextId }) {
-  refreshFromDisk();
-  const store = load();
-  const disc = discussionId
-    ? store.discussions.find(d => d.id   === discussionId)
-    : store.discussions.find(d => d.name === discussionName);
+  init();
+  let disc = null;
+  let projName = null;
+  const idx = loadProjectsIndex();
+  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  for (const pName of seen) {
+    const d = loadProjectData(pName);
+    const found = discussionId
+      ? d.discussions.find(x => x.id   === discussionId)
+      : d.discussions.find(x => x.name === discussionName);
+    if (found) { disc = found; projName = pName; break; }
+  }
   if (!disc) return null;
   const step = (disc.steps || []).find(s => s.id === stepId);
   if (!step) return null;
@@ -693,7 +817,7 @@ export function updateDiscussionStep({ discussionName, discussionId, stepId, sta
   const allDone = disc.steps.every(s => s.status === 'done' || s.status === 'skipped');
   if (allDone && disc.status !== 'done') disc.status = 'done';
   disc.updatedAt = new Date().toISOString();
-  _changedDiscussionNames.add(disc.name);
+  _dirtyProjects.add(projName);
   markDirty();
   return { discussion: disc, step };
 }
@@ -701,17 +825,26 @@ export function updateDiscussionStep({ discussionName, discussionId, stepId, sta
 // ── Auto-operations ───────────────────────────────────────────────────────────
 
 export function archiveExpired(project) {
-  refreshFromDisk();
-  const store = load();
+  init();
   const now = new Date().toISOString();
   let count = 0;
-  for (const entry of store.contexts) {
-    if (entry.expiresAt && entry.expiresAt < now && entry.status !== 'archived') {
-      entry.status    = 'archived';
-      entry.updatedAt = now;
-      _changedContextIds.add(entry.id);
-      count++;
+  const processEntries = (entries, projName) => {
+    for (const entry of entries) {
+      if (entry.expiresAt && entry.expiresAt < now && entry.status !== 'archived') {
+        entry.status    = 'archived';
+        entry.updatedAt = now;
+        _dirtyProjects.add(projName);
+        count++;
+      }
     }
+  };
+
+  if (project) {
+    processEntries(getAllEntries(project), project);
+  } else {
+    const idx = loadProjectsIndex();
+    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    for (const name of seen) processEntries(getAllEntries(name).slice(), name);
   }
   if (count > 0) markDirty();
   return { archived: count };
@@ -726,34 +859,29 @@ export function flushStore() { flushToDisk(); }
 // ── Auto-compaction ───────────────────────────────────────────────────────────
 
 const COMPACTION_THRESHOLD = 20;
-const COMPACTION_TARGET = 30;
+const COMPACTION_TARGET    = 30;
 
 export function shouldCompact(project) {
   return countContext(project) > COMPACTION_THRESHOLD;
 }
 
 export function compactProject(project, summaryContent) {
-  refreshFromDisk();
-  const store = load();
+  init();
   const proj = project || 'global';
-  const entries = store.contexts
-    .filter(c => (c.project === proj) && c.type !== 'summary')
+  const data = loadProjectData(proj);
+  const entries = data.context
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   if (entries.length < COMPACTION_TARGET) return null;
   const toRemove = new Set(entries.slice(0, COMPACTION_TARGET).map(e => e.id));
-  const removed = store.contexts.filter(c => toRemove.has(c.id));
-  store.contexts = store.contexts.filter(c => !toRemove.has(c.id));
-  for (const e of removed) {
-    _deletedContextIds.add(e.id);
-    _changedContextIds.delete(e.id);
-  }
+  const removed = entries.filter(e => toRemove.has(e.id));
+  for (const entry of removed) removeEntryFromData(data, entry);
+  _dirtyProjects.add(proj);
   markDirty();
-  // save the compaction summary as a new entry
   const summary = saveContext({
     project: proj,
     title: `Compacted ${removed.length} entries — ${new Date().toISOString().slice(0, 10)}`,
     content: summaryContent,
-    type: 'summary',
+    type: 'compaction',
     source: 'auto',
     tags: ['compaction', 'auto'],
   });
@@ -763,16 +891,14 @@ export function compactProject(project, summaryContent) {
 // ── Graph registry ────────────────────────────────────────────────────────────
 
 export function saveGraph({ path, nodes, edges, communities, cached, changed, time_ms, summary }) {
-  refreshFromDisk();
-  const store = load();
-  // Deduplicate: collapse any case/slash variants of same path, keep newest
-  const dupes = store.graphs.filter(g => normPath(g.path) === normPath(path));
-  if (dupes.length > 1) {
-    const keep = dupes.reduce((a, b) => (a.builtAt >= b.builtAt ? a : b));
-    store.graphs = store.graphs.filter(g => normPath(g.path) !== normPath(path));
-    store.graphs.push(keep);
-  }
-  const existing = store.graphs.find(g => normPath(g.path) === normPath(path));
+  init();
+  // Find project by rootPath matching graph path
+  const idx = loadProjectsIndex();
+  const proj = idx.find(p => normPath(p.rootPath) === normPath(path));
+  const projName = proj ? proj.name : 'global';
+
+  const data = loadProjectData(projName);
+  const existing = data.graph.build;
   const record = {
     path,
     nodes:       nodes       ?? existing?.nodes       ?? 0,
@@ -784,22 +910,37 @@ export function saveGraph({ path, nodes, edges, communities, cached, changed, ti
     summary:     summary     || existing?.summary     || '',
     builtAt:     new Date().toISOString(),
   };
-  if (existing) {
-    Object.assign(existing, record);
-  } else {
-    store.graphs.push(record);
-  }
-  _changedGraphPaths.add(path);
+  data.graph.build = record;
+  _dirtyProjects.add(projName);
   markDirty();
   return record;
 }
 
 export function getGraph(path) {
-  const store = load();
-  if (path) return store.graphs.find(g => normPath(g.path) === normPath(path)) || null;
-  return store.graphs;
+  init();
+  if (!path) return listGraphs();
+  const idx = loadProjectsIndex();
+  for (const proj of idx) {
+    if (normPath(proj.rootPath) === normPath(path)) {
+      return loadProjectData(proj.name).graph.build || null;
+    }
+  }
+  // fallback: scan all loaded data
+  for (const [, data] of _projectData.entries()) {
+    if (data.graph.build && normPath(data.graph.build.path) === normPath(path))
+      return data.graph.build;
+  }
+  return null;
 }
 
 export function listGraphs() {
-  return load().graphs;
+  init();
+  const idx = loadProjectsIndex();
+  const results = [];
+  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  for (const name of seen) {
+    const build = loadProjectData(name).graph.build;
+    if (build) results.push(build);
+  }
+  return results;
 }

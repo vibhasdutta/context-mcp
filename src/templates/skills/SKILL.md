@@ -27,7 +27,7 @@ Both fields are required: `project` names the memory bucket, `rootPath` enables 
 
 Returns:
 - `recentEntries` — decisions, bugs, notes from past sessions
-- `activeDiscussions` — ongoing topics (auto-linked if exactly one active)
+- `activePlans` — active AI-created plans for this project
 - `codegraph` — `{ built: true/false, nodes, edges, communities }`
 
 Then:
@@ -43,7 +43,7 @@ Then:
 **1. After graph build or rebuild**
 Every time `codegraph_build` completes successfully, immediately call:
 ```
-context.save  project: "<project>"  type: "architecture"  title: "ContextGraph built — <project>"
+context.save  project: "<project>"  type: "note"  title: "ContextGraph built — <project>"
 content: "nodes: X | edges: Y | communities: Z | built: <timestamp>"
 ```
 
@@ -63,17 +63,11 @@ Do NOT save for: routine file reads, search results, explanations of existing co
 | What happened | Type |
 |--------------|------|
 | Approach / library / pattern decided | `decision` |
-| Bug found (root cause known) or fixed | `bug` |
-| System structure understood | `architecture` |
-| Gotcha, constraint, non-obvious behavior | `note` |
-| Config / env var / secret key discovered | `config` |
-| External API or service integration learned | `note` |
-| Performance insight (why something is slow/fast) | `note` |
-| How to run tests / test pattern discovered | `note` |
-| Deploy / release step discovered | `note` |
-| Milestone / feature / task completed | `note` |
+| Bug found, root cause known, or fixed | `bug` |
+| Gotcha, constraint, discovery, structure understood | `note` |
+| Config / env var / secret / deploy step | `config` |
 
-Always pass `project`. Feature spans multiple sessions → `discussion.create` or `discussion.update`. Need past info → `search` before asking user. Auto-compact fires at >20 entries.
+Always pass `project`. **Making any plan** → `plan.save` immediately (planDir = your platform's plans folder). Need past info → `search` before asking user. Auto-compact fires at >20 entries.
 
 ---
 

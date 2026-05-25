@@ -40,13 +40,12 @@ export const definition = {
       title:         { type: 'string' },
       project:       { type: 'string' },
       rootPath:      { type: 'string', description: 'Absolute path to the project root directory. Stored on first call and used to sandbox file/git tool access.' },
-      type:          { type: 'string', enum: ['decision', 'note', 'code', 'bug', 'architecture', 'config', 'summary', 'error'] },
+      type:          { type: 'string', enum: ['decision', 'bug', 'note', 'config'] },
       status:        { type: 'string', enum: ['active', 'archived'] },
       tags:          { type: 'array', items: { type: 'string' } },
       source:        { type: 'string', enum: ['user', 'ai-summary', 'file', 'web', 'cli', 'auto'] },
       files:         { type: 'array', items: { type: 'object' } },
       codeRefs:      { type: 'array', items: { type: 'object' } },
-      relations:     { type: 'array', items: { type: 'object' } },
       expiresAt:     { type: 'string' },
       limit:         { type: 'number' },
       includeArchived: { type: 'boolean' },
@@ -117,7 +116,7 @@ export async function handle(args, state) {
 
       return {
         recentEntries:      entries,
-        activeDiscussions:  discussions,
+        activePlans:        discussions,
         restoredDiscussion: discussions.length === 1 ? { id: discussions[0].id, name: discussions[0].name } : null,
         codegraph:          graphStatus,
         digest:             digest || undefined,
@@ -165,13 +164,12 @@ export async function handle(args, state) {
           type: args.type || dupe.type, status: args.status || dupe.status,
           expiresAt: args.expiresAt !== undefined ? args.expiresAt : dupe.expiresAt,
           files: args.files || dupe.files, codeRefs: args.codeRefs || dupe.codeRefs,
-          relations: args.relations || dupe.relations,
         });
         fireAutoLink(updated.id, state);
         return { success: true, id: updated.id, deduplicated: true,
           message: `Updated existing entry "${updated.title || updated.id}" (auto-dedup).` };
       }
-      const entry = saveContext({ ...args });
+      const entry = saveContext({ ...args, rootPath: state.projectRootPath || undefined });
       fireAutoLink(entry.id, state);
 
       // Auto-compact when too many entries accumulate
