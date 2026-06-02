@@ -114,6 +114,7 @@ function printUsage() {
   cmd('ctx list [project]',            'list entries + discussions + graphs');
   cmd('ctx search <query>',            'keyword → semantic fallback search');
   cmd('ctx add',                       'add entry interactively');
+  cmd('ctx save --title "..." --content "..." --project <p> --type <t>', 'save entry non-interactively (for scripts/hooks)');
   cmd('ctx delete <id-prefix>',        'delete one entry');
   cmd('ctx delete project <name|id>',  'delete all entries for a project');
   cmd('ctx summary [project]',         'summarize recent entries');
@@ -1011,6 +1012,30 @@ async function cmdAdd(existingRl) {
   console.log(`  ${ok('✓')} ${bold(entry.title || '(no title)')}  ${faint('id:' + entry.id.slice(0, 8))}`);
 }
 
+// ── Save (non-interactive, flag-based — used by hooks and scripts) ───────────
+
+function cmdSave(args) {
+  // Usage: ctx save --title "..." --content "..." --project <p> --type <t> --tags <t1,t2>
+  const flags = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      flags[args[i].slice(2)] = args[i + 1] || '';
+      i++;
+    }
+  }
+  const content = flags.content || flags.c;
+  if (!content) { console.log(`  ${bad('✗')} --content required`); process.exit(1); }
+  const entry = saveContext({
+    title:   (flags.title || flags.t || '').trim(),
+    content: content.trim(),
+    project: (flags.project || flags.p || '').trim() || 'global',
+    tags:    (flags.tags || '').split(',').map(s => s.trim()).filter(Boolean),
+    type:    (flags.type || 'note').trim(),
+    source:  'cli',
+  });
+  console.log(`  ${ok('✓')} saved "${entry.title || entry.id.slice(0, 8)}" → ${entry.project}`);
+}
+
 // ── Delete ────────────────────────────────────────────────────────────────────
 
 function cmdDelete(args) {
@@ -1120,6 +1145,8 @@ async function interactive() {
           clearScreen(); printCompactHeader('settings'); await cmdSettings(rl); break;
         case 'add':
           clearScreen(); printCompactHeader('add'); await cmdAdd(rl); break;
+        case 'save':
+          cmdSave(rest); break;
         case 'delete': case 'del': case 'rm':
           clearScreen(); printCompactHeader('delete'); cmdDelete(rest); break;
         case 'help': case '?':
@@ -1201,6 +1228,8 @@ async function checkForUpdate() {
       await cmdSettings(); break;
     case 'add':
       await cmdAdd(); break;
+    case 'save':
+      cmdSave(rest); break;
     case 'delete': case 'del': case 'rm':
       cmdDelete(rest); break;
     case 'help': case '--help': case '-h':
