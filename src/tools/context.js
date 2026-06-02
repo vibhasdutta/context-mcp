@@ -186,13 +186,21 @@ export async function handle(args, state) {
       const entry = saveContext({ ...args, rootPath: state.projectRootPath || undefined });
       fireAutoLink(entry.id, state);
 
-      // Auto-compact when too many entries accumulate
+      // Auto-compact when too many entries accumulate.
+      // If the AI just saved a compaction entry, use that content as the summary
+      // instead of running TF-IDF on top of it.
       let compaction = null;
       if (shouldCompact(entry.project)) {
-        const old = getContext({ project: entry.project, limit: 500 });
-        const { summarizeEntries: summarize } = await import('../summarizer.js');
-        const cs = summarize(old.slice(old.length - 30), { project: entry.project || 'global', sessionLabel: 'auto-compaction', topN: 5 });
-        compaction = compactProject(entry.project, cs);
+        if (entry.type === 'compaction') {
+          // AI wrote a proper summary — compact old entries without creating a duplicate summary
+          compaction = compactProject(entry.project, entry.content, { skipSummaryEntry: true });
+        } else {
+          // AI didn't write a summary — fall back to TF-IDF extractive summarization
+          const old = getContext({ project: entry.project, limit: 500 });
+          const { summarizeEntries: summarize } = await import('../summarizer.js');
+          const summaryContent = summarize(old.slice(old.length - 30), { project: entry.project || 'global', sessionLabel: 'auto-compaction', topN: 5 });
+          compaction = compactProject(entry.project, summaryContent);
+        }
       }
 
       return { success: true, id: entry.id, deduplicated: false,

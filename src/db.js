@@ -814,14 +814,20 @@ const COMPACTION_THRESHOLD = 20;
 const COMPACTION_TARGET    = 30;
 
 export function shouldCompact(project) {
-  return countContext(project) > COMPACTION_THRESHOLD;
+  init();
+  // Only count non-compaction entries — compaction summaries themselves don't trigger further compaction
+  const proj = project || 'global';
+  const data = loadProjectData(proj);
+  const nonCompaction = [...data.context, ...data.summary].filter(e => e.type !== 'compaction');
+  return nonCompaction.length > COMPACTION_THRESHOLD;
 }
 
-export function compactProject(project, summaryContent) {
+export function compactProject(project, summaryContent, { skipSummaryEntry = false } = {}) {
   init();
   const proj = project || 'global';
   const data = loadProjectData(proj);
   const entries = data.context
+    .filter(e => e.type !== 'compaction')  // never remove existing compaction summaries
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   if (entries.length < COMPACTION_TARGET) return null;
   const toRemove = new Set(entries.slice(0, COMPACTION_TARGET).map(e => e.id));
@@ -829,6 +835,10 @@ export function compactProject(project, summaryContent) {
   for (const entry of removed) removeEntryFromData(data, entry);
   _dirtyProjects.add(proj);
   markDirty();
+  // If AI already saved a compaction entry this call, don't create a duplicate
+  if (skipSummaryEntry) {
+    return { removedCount: removed.length, summaryId: null };
+  }
   const summary = saveContext({
     project: proj,
     title: `Compacted ${removed.length} entries — ${new Date().toISOString().slice(0, 10)}`,
