@@ -122,9 +122,9 @@ function printUsage() {
   cmd('ctx discuss [project]',         'show discussions');
   cmd('ctx stats',                     'storage report: entries, types, graph status');
   console.log('');
-  cmd('ctx install --initial',         'install / update Node.js + Python (codegraph) deps');
-  cmd('ctx install --<platform>',      'write MCP config + skill/rules for an AI platform');
-  cmd('ctx install --all',             'install for all platforms at once');
+  cmd('ctx install --initial',         'install / update Node.js + Python (codegraph) deps only');
+  cmd('ctx install --<platform>',      'write MCP config + skill/rules file only (no uv/npm)');
+  cmd('ctx install --all',             'write config + skill files for all platforms');
   cmd('ctx online [--port N]',         'start HTTP server for Claude.ai / ChatGPT');
   cmd('ctx online --close',            'stop the running HTTP server');
   cmd('ctx settings',                  'view and edit config (port, host, client id/secret)');
@@ -791,27 +791,6 @@ async function cmdInstall(args) {
 
   // ── Global gitignore — add context-mcp runtime files if global gitignore exists ──
   _updateGlobalGitignore();
-  console.log('');
-
-  // ── Python / uv setup (codegraph) ─────────────────────────────────────────
-  console.log(`  ${bold(lblue('Python Codegraph'))}`);
-  const uvCheck = spawnSync('uv', ['--version'], { encoding: 'utf8' });
-  if (uvCheck.error || uvCheck.status !== 0) {
-    console.log(`  ${bad('✗')} uv not found — install it from ${accent('https://docs.astral.sh/uv/')} to enable codegraph`);
-    console.log('');
-    return;
-  }
-  console.log(`  ${ok('✓')} uv found: ${faint(uvCheck.stdout.trim())}`);
-
-  // Package root is one level up from src/
-  const __dirname_cli = dirname(fileURLToPath(import.meta.url));
-  const pkgRoot = join(__dirname_cli, '..');
-  const sync = spawnSync('uv', ['--directory', pkgRoot, 'sync', '--no-dev'], { encoding: 'utf8' });
-  if (sync.status !== 0) {
-    console.log(`  ${bad('✗')} uv sync failed:\n${faint((sync.stderr || sync.stdout || '').trim())}`);
-  } else {
-    console.log(`  ${ok('✓')} Python environment ready — codegraph enabled`);
-  }
   console.log('');
 }
 
