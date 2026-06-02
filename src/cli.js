@@ -119,7 +119,7 @@ function printUsage() {
   cmd('ctx summary [project]',         'summarize recent entries');
   cmd('ctx projects',                  'show all projects + graphs');
   cmd('ctx discuss [project]',         'show discussions');
-  cmd('ctx benchmark',                 'token savings report (memory + graph)');
+  cmd('ctx stats',                     'storage report: entries, types, graph status');
   console.log('');
   cmd('ctx install --initial',         'install / update Node.js + Python (codegraph) deps');
   cmd('ctx install --<platform>',      'write MCP config + skill/rules for an AI platform');
@@ -140,7 +140,7 @@ function printUsage() {
   icmd('projects',                     'show all projects');
   icmd('discuss [project]',            'show discussions');
   icmd('summary [project]',            'summarize recent entries');
-  icmd('benchmark',                    'token savings report');
+  icmd('stats',                        'storage report');
   icmd('install --<platform>',         'install for a platform');
   icmd('settings',                     'edit config');
   icmd('clear',                        'clear screen');
@@ -411,137 +411,54 @@ function cmdSummary(args) {
 // ── Benchmark ────────────────────────────────────────────────────────────────
 
 
-function _walkBytes(dirPath) {
-  const walkScript =
-    `const fs=require('fs'),path=require('path');` +
-    `function walk(d,t=0){try{for(const f of fs.readdirSync(d)){` +
-    `const p=path.join(d,f);try{const s=fs.statSync(p);` +
-    `if(s.isDirectory()&&!['node_modules','.git','codegraph-cache','.venv','venv','__pycache__','dist','build','.next'].includes(f))t+=walk(p);` +
-    `else if(s.isFile()&&/\\.(js|jsx|ts|tsx|py|json|md|yaml|yml|toml|sh|bash|env|txt|css|html|sql|go|rs|java|rb|php|c|cpp|h)$/.test(f)&&!/^(package-lock|uv\.lock|yarn\.lock|Pipfile\.lock|poetry\.lock)$/.test(path.basename(f,path.extname(f))+path.extname(f)))t+=s.size;}catch{}}}catch{}return t;}` +
-    `console.log(walk(${JSON.stringify(dirPath)}));`;
-  const res = spawnSync('node', ['-e', walkScript], { encoding: 'utf8', timeout: 8000 });
-  return res.stdout ? parseInt(res.stdout.trim()) : null;
-}
+function cmdStats() {
+  const projects   = listProjects();
+  const graphs     = listGraphs();
+  const allEntries = getContext({ limit: 2000, compact: false });
 
-function _sampleQueryTokens(graphPath) {
-  const questions = ['what does the server do', 'how is the graph built', 'what calls save'];
-  const sizes = [];
-  for (const q of questions) {
-    const req = JSON.stringify({ tool: 'codegraph_query', args: { path: graphPath, question: q, token_budget: 2000 } });
-    const res = spawnSync('uv', ['run', 'python', '-m', 'codegraph'],
-      { input: req, encoding: 'utf8', cwd: process.cwd(), timeout: 12000 });
-    if (res.stdout) { try { const r = JSON.parse(res.stdout); if (!r.error) sizes.push(res.stdout.length); } catch {} }
-  }
-  return { avgTok: sizes.length ? Math.round(sizes.reduce((a, b) => a + b, 0) / sizes.length / 4) : 472, measured: sizes.length > 0 };
-}
+  printSection('Stats', 'context-mcp storage report');
 
-function cmdBenchmark() {
-  const graphs   = listGraphs();
-  const projects = listProjects();
-  printSection('Benchmark', 'real token savings');
-
-  const RESUME_LIMIT = 15;
-  const COMPACT_AT   = 20;
-
-  // ── Measure entry sizes from actual stored data ──────────────────────────────
-  const allEntries   = getContext({ limit: 500, compact: false });
-  const totalEntries = allEntries.length;
-  let avgFullTok = 155, avgCompactTok = 50;
-  if (allEntries.length) {
-    const fullSizes    = allEntries.map(e => JSON.stringify(e).length);
-    const compactSizes = allEntries.map(e =>
-      ([e.title || '', (e.content || '').slice(0, 200), (e.tags || []).join(' ')].join(' ')).length);
-    avgFullTok    = Math.round(fullSizes.reduce((a, b) => a + b, 0) / fullSizes.length / 4);
-    avgCompactTok = Math.round(compactSizes.reduce((a, b) => a + b, 0) / compactSizes.length / 4);
-  }
-
-  // ── Run graph queries once, reuse in both sections ────────────────────────────
-  let avgQueryTok = 472, queryMeasured = false;
-  if (graphs.length) {
-    const r = _sampleQueryTokens(graphs[0].path);
-    avgQueryTok   = r.avgTok;
-    queryMeasured = r.measured;
-  }
-
-  // ── Corpus size (run once) ────────────────────────────────────────────────────
-  let corpusToks = null;
-  if (graphs.length) {
-    const bytes = _walkBytes(graphs[0].path);
-    if (bytes) corpusToks = Math.round(bytes / 4);
-  }
-
-  // ── Memory ───────────────────────────────────────────────────────────────────
-  // Without context-mcp: AI reads all entries at full size every conversation
-  // With context-mcp:    AI loads min(15, N) entries as compact previews via resume
-  console.log(`\n  ${bold(lblue('Memory'))}  ${faint('measured from actual stored entries')}`);
-  if (totalEntries) {
-    const resumeCount   = Math.min(RESUME_LIMIT, totalEntries);
-    const withoutMemTok = totalEntries * avgFullTok;         // load all entries full
-    const withMemTok    = resumeCount  * avgCompactTok;      // resume: compact previews only
-    const memSaved      = withoutMemTok - withMemTok;
-    const memReduction  = (withoutMemTok / withMemTok).toFixed(1);
-    const memPct        = ((1 - withMemTok / withoutMemTok) * 100).toFixed(1);
-
-    console.log(`    ${faint('avg entry size (full):   ')} ${muted(avgFullTok)} tok  ${faint('(measured)')}`);
-    console.log(`    ${faint('avg entry size (compact):')} ${muted(avgCompactTok)} tok  ${faint('(measured)')}`);
-    console.log(`    ${faint('stored:                  ')} ${muted(totalEntries)} entries  ${faint('across')} ${muted(projects.length)} project(s)`);
-    console.log(`    ${faint('without — load all full: ')} ${warn('~' + withoutMemTok.toLocaleString('en-US'))} tokens`);
-    console.log(`    ${faint('with    — resume compact:')} ${ok('~' + withMemTok.toLocaleString('en-US'))} tokens  ${faint(`(${resumeCount} of ${totalEntries} entries)`)}`);
-    console.log(`    ${faint('saved per chat:          ')} ${ok('~' + memSaved.toLocaleString('en-US'))} tokens  ${highlight(memReduction + '×')}  ${ok(memPct + '%')} reduction`);
-    console.log(`    ${faint('auto-compact at:         ')} ${faint(COMPACT_AT + ' entries → oldest summarized to 1')}`);
-    console.log('');
+  // ── Projects ──────────────────────────────────────────────────────────────────
+  console.log(`\n  ${bold(lblue('Projects'))}`);
+  if (!projects.length) {
+    console.log(`    ${faint('no projects yet')}`);
+  } else {
     for (const p of projects) {
-      const pToks  = p.count * avgFullTok;
-      const barLen = Math.min(Math.ceil(p.count / 2), 24);
-      const bar    = color(C.dblue, '█'.repeat(barLen)) + color(C.darkgray, '░'.repeat(24 - barLen));
-      console.log(`    ${color(C.darkgray, '·')} ${muted(p.name.padEnd(22))} ${bar}  ${faint(p.count + ' entries · ~' + pToks.toLocaleString('en-US') + ' tok full')}`);
+      const g = graphs.find(gr => {
+        const gp = (gr.path || '').replace(/\\/g, '/').replace(/\/$/, '').split('/').pop();
+        return gp === p.name;
+      });
+      const graphStatus = g ? ok(`graph: ${g.nodes} nodes, ${g.edges} edges`) : faint('no graph');
+      const builtAt = g?.builtAt ? faint('  built ' + g.builtAt.slice(0, 10)) : '';
+      console.log(`    ${bold(p.name.padEnd(24))} ${muted(String(p.count).padStart(3) + ' entries')}  ${graphStatus}${builtAt}`);
     }
-  } else {
+  }
+
+  // ── Entry type breakdown ──────────────────────────────────────────────────────
+  console.log(`\n  ${bold(lblue('Entries by type'))}`);
+  if (!allEntries.length) {
     console.log(`    ${faint('no entries yet')}`);
-  }
-
-  // ── CodeGraph ─────────────────────────────────────────────────────────────────
-  // Without context-mcp: AI reads all source files to answer structural questions
-  // With context-mcp:    AI calls codegraph_query → focused NODE/EDGE subgraph
-  console.log(`\n  ${bold(lblue('CodeGraph'))}  ${faint('measured from live graph queries')}`);
-  if (!graphs.length) {
-    console.log(`    ${faint('no graphs — run codegraph_build first')}`);
   } else {
-    for (const g of graphs) {
-      const pathShort  = g.path.replace(/\\/g, '/').split('/').slice(-2).join('/');
-      const builtAt    = (g.builtAt || '').slice(0, 10);
-      const graphReduce = corpusToks ? (corpusToks / avgQueryTok).toFixed(0) + '×' : null;
-      const graphPct    = corpusToks ? ((1 - avgQueryTok / corpusToks) * 100).toFixed(2) : null;
-
-      console.log(`\n    ${accent('⬡')} ${bold(pathShort)}  ${faint(builtAt)}`);
-      console.log(`      ${faint('nodes:')} ${muted(g.nodes)}  ${faint('edges:')} ${muted(g.edges)}  ${faint('clusters:')} ${muted(g.communities)}`);
-      if (corpusToks) console.log(`      ${faint('without — read all files:')} ${warn('~' + corpusToks.toLocaleString('en-US'))} tokens  ${faint('(all source + config + doc files)')}`);
-      console.log(`      ${faint('with    — graph query:   ')} ${ok('~' + avgQueryTok.toLocaleString('en-US'))} tokens  ${faint(queryMeasured ? '(avg of 3 live queries)' : '(calibrated fallback)')}`);
-      if (graphReduce) console.log(`      ${faint('saved per query:         ')} ${highlight(graphReduce)}  ${ok(graphPct + '%')} fewer tokens`);
+    const byType = {};
+    for (const e of allEntries) { byType[e.type] = (byType[e.type] || 0) + 1; }
+    for (const [type, count] of Object.entries(byType).sort((a, b) => b[1] - a[1])) {
+      const bar = color(C.dblue, '█'.repeat(Math.min(count, 20))) + color(C.darkgray, '░'.repeat(Math.max(0, 20 - count)));
+      console.log(`    ${type.padEnd(14)} ${bar}  ${muted(count)}`);
     }
   }
 
-  // ── Combined ──────────────────────────────────────────────────────────────────
-  // Without: read all files (no graph) + load all entries full (no memory system)
-  // With:    compact resume (memory) + one graph query (codegraph)
-  if (graphs.length) {
-    const resumeCount   = Math.min(RESUME_LIMIT, totalEntries);
-    const withMemTok    = resumeCount * avgCompactTok;
-    const withMcp       = withMemTok + avgQueryTok;
-    const withoutMemTok = totalEntries * avgFullTok;
-    const withoutMcp    = withoutMemTok + (corpusToks || graphs[0].nodes * 80);
-    const totalRed      = withoutMcp > 0 ? (withoutMcp / withMcp).toFixed(0) : '—';
-    const totalPct      = withoutMcp > 0 ? ((1 - withMcp / withoutMcp) * 100).toFixed(2) : '—';
+  // ── Storage summary ───────────────────────────────────────────────────────────
+  const compactions = allEntries.filter(e => e.type === 'compaction').length;
+  const avgSize = allEntries.length
+    ? Math.round(allEntries.reduce((s, e) => s + (e.content || '').length, 0) / allEntries.length)
+    : 0;
 
-    console.log(`\n  ${bold(lblue('Combined'))}  ${faint('per conversation')}`);
-    console.log(`    ${faint('without context-mcp:  ')} ${warn('~' + withoutMcp.toLocaleString('en-US'))} tokens  ${faint('(all entries full + all files read directly)')}`);
-    console.log(`    ${faint('with context-mcp:     ')} ${ok('~' + withMcp.toLocaleString('en-US'))} tokens  ${faint('(compact resume + 1 graph query)')}`);
-    console.log(`    ${faint('total reduction:      ')} ${highlight(totalRed + '×')}  ${ok(totalPct + '%')} fewer tokens`);
-  }
-
+  console.log(`\n  ${bold(lblue('Storage'))}`);
+  console.log(`    ${faint('total entries:  ')} ${muted(allEntries.length)}`);
+  console.log(`    ${faint('compactions:    ')} ${muted(compactions)}`);
+  console.log(`    ${faint('avg entry size: ')} ${muted(avgSize + ' chars')}`);
+  console.log(`    ${faint('graphs built:   ')} ${muted(graphs.length)}`);
   console.log('');
-  console.log(line());
-  console.log(faint('  token estimate: chars ÷ 4  ·  corpus = all source/config/doc files (excl. lock files, .venv, node_modules)'));
 }
 
 
@@ -1193,8 +1110,8 @@ async function interactive() {
           clearScreen(); printCompactHeader('discussions'); cmdDiscussions(rest); break;
         case 'summary':
           clearScreen(); printCompactHeader('summary'); cmdSummary(rest); break;
-        case 'benchmark': case 'bench':
-          clearScreen(); printCompactHeader('benchmark'); cmdBenchmark(); break;
+        case 'stats':
+          clearScreen(); printCompactHeader('stats'); cmdStats(); break;
         case 'install':
           clearScreen(); printCompactHeader('install'); await cmdInstall(rest); break;
         case 'online':
@@ -1257,8 +1174,8 @@ async function checkForUpdate() {
       cmdDiscussions(rest); break;
     case 'summary':
       cmdSummary(rest); break;
-    case 'benchmark': case 'bench':
-      cmdBenchmark(); break;
+    case 'stats':
+      cmdStats(); break;
     case 'install':
       await cmdInstall(rest);
       process.exit(0);
