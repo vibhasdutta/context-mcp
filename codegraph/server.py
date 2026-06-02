@@ -4,10 +4,10 @@ codegraph/server.py — MCP server exposing codebase knowledge graph tools.
 
 Tools:
   codegraph_build   — scan project, extract AST nodes, build graph (local only, no API)
-  codegraph_query   — structural question OR single-node lookup (or both); replaces codegraph_explain
+  codegraph_query   — structural question OR single-node lookup (or both)
+  codegraph_arch    — module map: every file with its exports and imports
   codegraph_report  — return full CODEGRAPH_REPORT.md
   codegraph_nodes   — list nodes of a given type
-  codegraph_path    — shortest path between two concepts
 """
 
 import asyncio
