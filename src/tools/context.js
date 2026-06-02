@@ -176,6 +176,8 @@ export async function handle(args, state) {
           id: dupe.id, content: args.content,
           title: args.title || dupe.title, tags: args.tags || dupe.tags,
           type: args.type || dupe.type, status: args.status || dupe.status,
+          why: args.why !== undefined ? args.why : dupe.why,
+          outcome: args.outcome !== undefined ? args.outcome : dupe.outcome,
           expiresAt: args.expiresAt !== undefined ? args.expiresAt : dupe.expiresAt,
           files: args.files || dupe.files, codeRefs: args.codeRefs || dupe.codeRefs,
         });

@@ -156,7 +156,8 @@ function clearScreen() {
 // ── List (grouped by project) ─────────────────────────────────────────────────
 
 function cmdList(args) {
-  const filterProject  = args[0];
+  const projectFlagIdx = args.indexOf('--project');
+  const filterProject  = projectFlagIdx !== -1 ? args[projectFlagIdx + 1] : args[0];
   const entries        = getContext({ project: filterProject, limit: 100 });
   const allDiscussions = listDiscussions({ project: filterProject });
   const allGraphs      = listGraphs();
@@ -355,7 +356,8 @@ function cmdProjects() {
 // ── Discussions ───────────────────────────────────────────────────────────────
 
 function cmdDiscussions(args) {
-  const filterProject = args[0];
+  const projectFlagIdx = args.indexOf('--project');
+  const filterProject  = projectFlagIdx !== -1 ? args[projectFlagIdx + 1] : args[0];
   const discussions   = listDiscussions({ project: filterProject });
   printSection('Discussions', filterProject || 'all projects');
 
@@ -393,7 +395,8 @@ function cmdDiscussions(args) {
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 function cmdSummary(args) {
-  const project = args[0];
+  const projectFlagIdx = args.indexOf('--project');
+  const project        = projectFlagIdx !== -1 ? args[projectFlagIdx + 1] : args[0];
   const entries = getContext({ project, limit: 50 });
   printSection('Summary', project || 'global');
   if (!entries.length) { console.log(`  ${faint('no entries to summarize')}`); return; }
@@ -995,7 +998,7 @@ async function cmdAdd(existingRl) {
   const content = await ask('Content:');
   const project = await ask('Project (blank = global):');
   const tagsRaw = await ask('Tags (comma-separated):');
-  const type    = await ask('Type (note/decision/code/bug/architecture/config/error):');
+  const type    = await ask('Type (note/decision/bug/config/task/compaction):');
 
   if (!existingRl) rl.close();
   if (!content.trim()) { console.log(`  ${bad('✗')} content required`); return; }

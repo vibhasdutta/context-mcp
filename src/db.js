@@ -15,6 +15,7 @@
 import {
   readFileSync, writeFileSync, mkdirSync, existsSync,
   openSync, closeSync, unlinkSync, renameSync, chmodSync, rmdirSync,
+  readdirSync,
 } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
@@ -122,7 +123,18 @@ function _readObj(filePath, defaults) {
 
 function loadProjectsIndex() {
   if (_projectsIndex) return _projectsIndex;
-  if (!existsSync(PROJECTS_PATH)) { _projectsIndex = []; return _projectsIndex; }
+  if (!existsSync(PROJECTS_PATH)) {
+    // Fall back to scanning the projects dir so CLI works without projects.json
+    _projectsIndex = [];
+    if (existsSync(PROJECTS_DIR)) {
+      try {
+        for (const slug of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
+          if (slug.isDirectory()) _projectsIndex.push({ name: slug.name, slug: slug.name });
+        }
+      } catch {}
+    }
+    return _projectsIndex;
+  }
   try {
     const d = JSON.parse(readFileSync(PROJECTS_PATH, 'utf8'));
     _projectsIndex = Array.isArray(d.projects) ? d.projects : [];
@@ -361,9 +373,8 @@ export function updateContext({ id, content, why, outcome, title, tags, type, st
   const newTree = treeFor(entry);
   if (newTree !== oldTree) {
     removeEntryFromData(data, entry);
-    const tempEntry = { ...entry };
-    if (newTree === 'summary') data.summary.push(tempEntry);
-    else data.context.push(tempEntry);
+    if (newTree === 'summary') data.summary.push(entry);
+    else data.context.push(entry);
   }
 
   _dirtyProjects.add(projectName);
@@ -657,7 +668,7 @@ export function updateDiscussion({ id, name, title, description, content, status
     if (found) { disc = found; projName = pName; break; }
   }
   if (!disc) return null;
-  if (title       !== undefined) disc.title       = truncate(title || disc.name, 80);
+  if (title       !== undefined) disc.title       = truncate(title || disc.name, 120);
   if (description !== undefined) disc.description = description || '';
   if (content     !== undefined) disc.content     = truncate(content || '', MAX_CONTENT_LENGTH);
   if (type        !== undefined) disc.type        = VALID_DISCUSSION_TYPES.has(type)      ? type   : disc.type;
