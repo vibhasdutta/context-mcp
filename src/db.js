@@ -178,7 +178,6 @@ function getAllEntries(projectName) {
   return [...data.context, ...data.summary];
 }
 
-// Find an entry by ID, optionally scoped to a project.
 function findEntryById(id, projectHint) {
   const search = (data) => {
     for (const arr of [data.context, data.summary]) {
@@ -196,7 +195,6 @@ function findEntryById(id, projectHint) {
     const e = search(data);
     if (e) return { entry: e, projectName: name };
   }
-  // Load all remaining projects
   const idx = loadProjectsIndex();
   for (const proj of idx) {
     if (_projectData.has(proj.name) || proj.name === projectHint) continue;
@@ -206,7 +204,6 @@ function findEntryById(id, projectHint) {
   return null;
 }
 
-// Remove an entry from its array in the project data.
 function removeEntryFromData(data, entry) {
   if (treeFor(entry) === 'summary') {
     data.summary = data.summary.filter(e => e.id !== entry.id);
@@ -865,7 +862,6 @@ export function compactProject(project, summaryContent, { skipSummaryEntry = fal
 
 export function saveGraph({ path, nodes, edges, communities, cached, changed, time_ms, summary }) {
   init();
-  // Find project by rootPath matching graph path
   const idx = loadProjectsIndex();
   const proj = idx.find(p => normPath(p.rootPath) === normPath(path));
   const projName = proj ? proj.name : 'global';

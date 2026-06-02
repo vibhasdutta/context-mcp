@@ -19,13 +19,12 @@ function writePlanFile(planDir, name, content, title) {
 export const definition = {
   name: 'plan',
   description:
-    `AI plan storage — auto-call this tool whenever you create any kind of plan.\n` +
-    `Saves a summary of the plan to the project store and writes a .md file to planDir.\n` +
-    `• "save"   — Store a new plan or overwrite an existing one by name. Pass planDir to write a file.\n` +
-    `• "update" — Patch title/content/status on an existing plan.\n` +
-    `• "get"    — Retrieve a plan by name or id (full content).\n` +
-    `• "list"   — List all plans for the project.\n` +
-    `• "delete" — Remove a plan by name or id.`,
+    `Plan storage — saves to project store, optionally writes a .md file to planDir.\n` +
+    `• "save"   — store a new plan or overwrite by name.\n` +
+    `• "update" — patch title/content/status.\n` +
+    `• "get"    — retrieve a plan by name or id.\n` +
+    `• "list"   — list all plans for the project.\n` +
+    `• "delete" — remove a plan by name or id.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -33,7 +32,7 @@ export const definition = {
       name:    { type: 'string', description: 'Short slug-style identifier for the plan, e.g. "auth-refactor"' },
       id:      { type: 'string' },
       project: { type: 'string' },
-      title:   { type: 'string', description: 'Human-readable plan title' },
+      title:   { type: 'string', description: 'Plan title' },
       content: { type: 'string', description: 'Full plan summary in markdown' },
       status:  { type: 'string', enum: ['active', 'done'] },
       tags:    { type: 'array', items: { type: 'string' } },

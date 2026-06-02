@@ -165,7 +165,6 @@ function cmdList(args) {
 
   printSection('Context', filterProject ? `project: ${filterProject}` : 'all projects');
 
-  // Build per-project map, split entries into their three trees
   const projects = {};
   const ensureProj = p => {
     if (!projects[p]) projects[p] = { context: [], summary: [], plans: [] };
@@ -221,7 +220,6 @@ function cmdList(args) {
       if (!secIsLast) console.log(`  ${color(C.darkgray, '│')}`);
     };
 
-    // ── Graph (build stats only) ──────────────────────────────────────────────
     if (graphBuild) {
       secIdx++;
       const isLast  = secIdx === sections.length;
@@ -230,13 +228,11 @@ function cmdList(args) {
       if (!isLast) console.log(`  ${color(C.darkgray, '│')}`);
     }
 
-    // ── Context ───────────────────────────────────────────────────────────────
     if (pData.context.length) {
       secIdx++;
       renderEntries(pData.context, 'context', secIdx === sections.length);
     }
 
-    // ── Summary (compaction digests only — no type labels) ───────────────────
     if (pData.summary.length) {
       secIdx++;
       const isLast = secIdx === sections.length;
@@ -250,7 +246,6 @@ function cmdList(args) {
       if (!isLast) console.log(`  ${color(C.darkgray, '│')}`);
     }
 
-    // ── Plans ─────────────────────────────────────────────────────────────────
     if (pData.plans.length) {
       secIdx++;
       const isLast = secIdx === sections.length;
@@ -315,7 +310,6 @@ function cmdProjects() {
     console.log(`\n  ${color(C.dblue, '◆')} ${bold(lblue(project.name))}${idTag}  ${bar}  ${faint(project.count + ' entries')}`);
     console.log(`  ${color(C.darkgray, '│')}`);
 
-    // Graph status
     if (graph) {
       const builtAt = (graph.builtAt || '').slice(0, 10);
       console.log(`  ${color(C.darkgray, '├─')} ${accent('⬡')} ${muted('graph')}  ${faint(`${graph.nodes}n · ${graph.edges}e · ${graph.communities} clusters · ${builtAt}`)}`);
@@ -323,7 +317,6 @@ function cmdProjects() {
       console.log(`  ${color(C.darkgray, '├─')} ${faint('⬡ no graph')}`);
     }
 
-    // Recent context
     if (entries.length) {
       console.log(`  ${color(C.darkgray, '├─')} ${muted('recent')}`);
       entries.forEach((e, i) => {
@@ -334,7 +327,6 @@ function cmdProjects() {
       });
     }
 
-    // Active discussions
     if (activeD.length) {
       console.log(`  ${color(C.darkgray, '├─')} ${muted('discussions')}`);
       activeD.forEach((d, i) => {

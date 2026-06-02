@@ -25,21 +25,21 @@ function autoDigest(entries, project) {
 export const definition = {
   name: 'context',
   description:
-    `Factual memory — record what happened, what was decided, what broke, what was built.\n` +
-    `• "resume"       — START HERE every conversation. Loads recent context, active discussions, and graph status for a project.\n` +
-    `• "save"         — Store a note, decision, bug, or code snippet. Auto-deduplicates.\n` +
-    `• "get"          — Load entries. Pass id/ids to fetch specific ones, or project/tags/limit for recent.\n` +
-    `• "update"       — Edit an existing entry by id (any field).\n` +
-    `• "delete"       — Remove one entry (id) or multiple at once (ids: [...]).\n` +
-    `• "list_projects"— Show all projects and entry counts.`,
+    `Factual memory — decisions, bugs, notes, discoveries.\n` +
+    `• "resume"       — call first every session. Returns recent entries, active plans, graph status.\n` +
+    `• "save"         — store an entry. Auto-deduplicates by content similarity.\n` +
+    `• "get"          — fetch by id/ids, or filter by project/tags/limit.\n` +
+    `• "update"       — edit an entry by id.\n` +
+    `• "delete"       — remove one entry (id) or several (ids: [...]).\n` +
+    `• "list_projects"— list all projects and entry counts.`,
   inputSchema: {
     type: 'object',
     properties: {
       action:        { type: 'string', enum: ['resume', 'save', 'get', 'update', 'delete', 'list_projects'] },
       content:       { type: 'string' },
-      title:         { type: 'string', description: 'Up to 120 chars — be specific about what was done' },
-      why:           { type: 'string', description: 'Why this mattered — the problem it solved or constraint it revealed' },
-      outcome:       { type: 'string', description: 'What the result was — fix verified, feature shipped, decision finalized' },
+      title:         { type: 'string', description: 'Up to 120 chars' },
+      why:           { type: 'string', description: 'Why it mattered' },
+      outcome:       { type: 'string', description: 'What the result was' },
       project:       { type: 'string' },
       rootPath:      { type: 'string', description: 'Absolute path to the project root directory. Stored on first call and used to sandbox file/git tool access.' },
       type:          { type: 'string', enum: ['decision', 'bug', 'note', 'config', 'task', 'compaction'] },
@@ -51,8 +51,8 @@ export const definition = {
       expiresAt:     { type: 'string' },
       limit:         { type: 'number' },
       includeArchived: { type: 'boolean' },
-      id:            { type: 'string', description: 'Single entry ID (get/update/delete)' },
-      ids:           { type: 'array', items: { type: 'string' }, description: 'Multiple entry IDs — fetch or delete several at once' },
+      id:            { type: 'string', description: 'Single entry ID' },
+      ids:           { type: 'array', items: { type: 'string' }, description: 'Multiple entry IDs' },
     },
     required: ['action'],
   },
@@ -80,11 +80,8 @@ export async function handle(args, state) {
       const proj = args.project || null;
       archiveExpired(proj);
 
-      // Set project on state so autoLink works for subsequent saves
       if (proj) state.sessionProject = proj;
 
-      // Store rootPath with project (first time only) and load it onto session state.
-      // Auto-detect from git if neither provided nor previously stored.
       const storedRoot = proj ? getProjectRoot(proj) : null;
       const resolvedRoot = args.rootPath || storedRoot || detectGitRoot() || null;
       if (proj) ensureProject(proj, resolvedRoot || undefined);
@@ -117,7 +114,6 @@ export async function handle(args, state) {
           : null;
       const totalEntries  = countContext(proj);
 
-      // Auto-restore single active discussion
       if (discussions.length === 1) state.discussionId = discussions[0].id;
 
       const digest = totalEntries > 10
@@ -149,7 +145,6 @@ export async function handle(args, state) {
     case 'save': {
       if (!args.content) throw new Error('content is required for save');
       if (!args.project && state.sessionProject) args = { ...args, project: state.sessionProject };
-      // Auto-detect and store project root if not yet configured
       if (args.project) {
         const existing = getProjectRoot(args.project);
         if (!existing) {
@@ -160,7 +155,6 @@ export async function handle(args, state) {
           }
         }
       }
-      // Validate file paths in files[] and codeRefs[] stay within project root
       if (state.projectRootPath) {
         if (Array.isArray(args.files)) {
           args.files.forEach(f => { if (f.path) guardPath(f.path, state.projectRootPath); });
