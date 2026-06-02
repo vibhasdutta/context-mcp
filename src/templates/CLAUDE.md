@@ -79,6 +79,9 @@ content: "nodes: X | edges: Y | communities: Z"
 **F. Explicit user request**
 "save this", "remember this", "note that" → save immediately.
 
+**G. Manual compaction request**
+"compact now", "summarize and compress", "clean up context", "compress memory" → write a full session summary and save as `type:"compaction"`. Server will automatically remove old entries using your summary.
+
 ### Do NOT save
 Routine file reads, search results, explanations of existing code, dead-end debugging steps.
 

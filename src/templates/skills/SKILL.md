@@ -62,6 +62,8 @@ context.save
 
 **F. Explicit user request** → "save this", "remember this" → save immediately.
 
+**G. Manual compaction** → "compact now", "compress memory", "clean up context" → write full session summary, save as `type:"compaction"`. Server removes old entries using your text.
+
 ### Do NOT save
 Routine file reads, search results, explanations of existing code, dead-end debugging.
 

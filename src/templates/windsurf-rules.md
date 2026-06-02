@@ -27,6 +27,7 @@ Returns: `recentEntries`, `activePlans`, `codegraph`, `stats.totalEntries`.
 | Config / env / deploy | `config` | title, content |
 | Graph build complete | `note` | nodes/edges count |
 | "save this" / "remember this" | any | title, content |
+| "compact now" / "compress memory" | `compaction` | full session summary |
 
 Title up to 120 chars. Always include `why` and `outcome` for task/bug/decision types.
 
