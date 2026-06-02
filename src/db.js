@@ -283,6 +283,8 @@ function compactEntry(e) {
     updatedAt: e.updatedAt || null,
     preview:   truncate(e.content, PREVIEW_LENGTH),
   };
+  if (e.why)     compact.why     = e.why;
+  if (e.outcome) compact.outcome = e.outcome;
   if (e.files    && e.files.length)    compact.files    = e.files;
   if (e.codeRefs && e.codeRefs.length) compact.codeRefs = e.codeRefs;
   if (e.expiresAt) compact.expiresAt = e.expiresAt;
@@ -291,7 +293,9 @@ function compactEntry(e) {
 
 // ── Context entries ──────────────────────────────────────────────────────────
 
-export function saveContext({ project, content, tags = [], source = 'user', title = '',
+const VALID_TYPES = new Set(['decision', 'bug', 'note', 'config', 'task', 'compaction']);
+
+export function saveContext({ project, content, why = '', outcome = '', tags = [], source = 'user', title = '',
   type = 'note', status = 'active', files = [], codeRefs = [],
   sessionId = null, parentId = null, expiresAt = null, rootPath = null }) {
   init();
@@ -299,6 +303,7 @@ export function saveContext({ project, content, tags = [], source = 'user', titl
   ensureProject(projectName, rootPath || undefined);
   const data = loadProjectData(projectName);
   const now = new Date().toISOString();
+  const validatedType = VALID_TYPES.has(type) ? type : 'note';
   const entry = {
     id: randomUUID(),
     project: projectName,
@@ -306,9 +311,11 @@ export function saveContext({ project, content, tags = [], source = 'user', titl
     parentId: parentId || sessionId || `project:${projectName}`,
     nodeType: 'entry',
     version: 1,
-    title: truncate(title, 60),
+    title: truncate(title, 120),
     content: truncate(content, MAX_CONTENT_LENGTH),
-    type,
+    why: truncate(why || '', 300),
+    outcome: truncate(outcome || '', 300),
+    type: validatedType,
     status,
     tags: normalizeTags(tags),
     source: normalizeSource(source),
@@ -320,15 +327,14 @@ export function saveContext({ project, content, tags = [], source = 'user', titl
     expiresAt: expiresAt || null,
   };
   const tree = treeFor(entry);
-  if (tree === 'graph') data.graph.entries.push(entry);
-  else if (tree === 'summary') data.summary.push(entry);
+  if (tree === 'summary') data.summary.push(entry);
   else data.context.push(entry);
   _dirtyProjects.add(projectName);
   markDirty();
   return entry;
 }
 
-export function updateContext({ id, content, title, tags, type, status, files, codeRefs, sessionId, parentId, expiresAt }) {
+export function updateContext({ id, content, why, outcome, title, tags, type, status, files, codeRefs, sessionId, parentId, expiresAt }) {
   init();
   const found = findEntryById(id);
   if (!found) return null;
@@ -337,9 +343,11 @@ export function updateContext({ id, content, title, tags, type, status, files, c
 
   const oldTree = treeFor(entry);
   if (content   !== undefined) entry.content   = truncate(content, MAX_CONTENT_LENGTH);
-  if (title     !== undefined) entry.title     = truncate(title, 60);
+  if (why       !== undefined) entry.why       = truncate(why     || '', 300);
+  if (outcome   !== undefined) entry.outcome   = truncate(outcome || '', 300);
+  if (title     !== undefined) entry.title     = truncate(title, 120);
   if (tags      !== undefined) entry.tags      = normalizeTags(tags);
-  if (type      !== undefined) entry.type      = type;
+  if (type      !== undefined) entry.type      = VALID_TYPES.has(type) ? type : entry.type;
   if (status    !== undefined) entry.status    = status;
   if (files     !== undefined) entry.files     = Array.isArray(files) ? files : [];
   if (codeRefs  !== undefined) entry.codeRefs  = Array.isArray(codeRefs) ? codeRefs : [];
@@ -353,10 +361,8 @@ export function updateContext({ id, content, title, tags, type, status, files, c
   const newTree = treeFor(entry);
   if (newTree !== oldTree) {
     removeEntryFromData(data, entry);
-    // Re-add with updated tree
     const tempEntry = { ...entry };
-    if (newTree === 'graph') data.graph.entries.push(tempEntry);
-    else if (newTree === 'summary') data.summary.push(tempEntry);
+    if (newTree === 'summary') data.summary.push(tempEntry);
     else data.context.push(tempEntry);
   }
 
@@ -478,7 +484,7 @@ export function deleteProject(nameOrId) {
 
   // Count before removing
   const data = _projectData.get(projectName) || loadProjectData(projectName);
-  const ctxCount  = data.context.length + data.graph.entries.length + data.summary.length;
+  const ctxCount  = data.context.length + data.summary.length;
   const discCount = data.discussions.length;
 
   // Remove project directory from disk
@@ -605,7 +611,7 @@ export function saveDiscussion({ name, title, description, content, project, tag
     project:          project          !== undefined ? (project || 'global')                              : (prev?.project          ?? 'global'),
     sessionId:        sessionId        !== undefined ? (sessionId || null)                                : (prev?.sessionId        ?? null),
     parentId:         parentId         !== undefined ? (parentId || null)                                 : (prev?.parentId         ?? null),
-    title:            title            !== undefined ? truncate(title || name, 80)                        : (prev?.title            ?? name),
+    title:            title            !== undefined ? truncate(title || name, 120)                       : (prev?.title            ?? name),
     description:      description      !== undefined ? (description || '')                                : (prev?.description      ?? ''),
     content:          content          !== undefined ? truncate(content || '', MAX_CONTENT_LENGTH)         : (prev?.content          ?? ''),
     type:             type             !== undefined ? (VALID_DISCUSSION_TYPES.has(type) ? type : 'plan')  : (prev?.type             ?? 'plan'),
@@ -747,28 +753,6 @@ export function linkContextToDiscussion({ discussionId, discussionName, contextI
   return { discussionId: disc.id, contextId };
 }
 
-export function getContextByDiscussion(discussionId) {
-  init();
-  const idx = loadProjectsIndex();
-  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
-  const results = [];
-  for (const name of seen) {
-    results.push(...getAllEntries(name).filter(c => c.discussionId === discussionId));
-  }
-  return results;
-}
-
-export function clearDiscussionLink(contextId) {
-  init();
-  const found = findEntryById(contextId);
-  if (!found) return null;
-  found.entry.discussionId = null;
-  found.entry.updatedAt = new Date().toISOString();
-  _dirtyProjects.add(found.projectName);
-  markDirty();
-  return found.entry;
-}
-
 export function deleteDiscussion({ name, id }) {
   init();
   const idx = loadProjectsIndex();
@@ -788,38 +772,6 @@ export function deleteDiscussion({ name, id }) {
     }
   }
   return { deleted: 0 };
-}
-
-export function updateDiscussionStep({ discussionName, discussionId, stepId, status, linkedContextId }) {
-  init();
-  let disc = null;
-  let projName = null;
-  const idx = loadProjectsIndex();
-  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
-  for (const pName of seen) {
-    const d = loadProjectData(pName);
-    const found = discussionId
-      ? d.discussions.find(x => x.id   === discussionId)
-      : d.discussions.find(x => x.name === discussionName);
-    if (found) { disc = found; projName = pName; break; }
-  }
-  if (!disc) return null;
-  const step = (disc.steps || []).find(s => s.id === stepId);
-  if (!step) return null;
-  if (status) step.status = status;
-  if (status === 'done') step.completedAt = new Date().toISOString();
-  if (linkedContextId) {
-    if (!Array.isArray(step.linkedContextIds)) step.linkedContextIds = [];
-    if (!step.linkedContextIds.includes(linkedContextId)) step.linkedContextIds.push(linkedContextId);
-    if (!Array.isArray(disc.linkedContextIds)) disc.linkedContextIds = [];
-    if (!disc.linkedContextIds.includes(linkedContextId)) disc.linkedContextIds.push(linkedContextId);
-  }
-  const allDone = disc.steps.every(s => s.status === 'done' || s.status === 'skipped');
-  if (allDone && disc.status !== 'done') disc.status = 'done';
-  disc.updatedAt = new Date().toISOString();
-  _dirtyProjects.add(projName);
-  markDirty();
-  return { discussion: disc, step };
 }
 
 // ── Auto-operations ───────────────────────────────────────────────────────────
