@@ -8,7 +8,7 @@
  *
  * New layout:
  *   ~/.context-mcp/projects/<slug>/context.json
- *   ~/.context-mcp/projects/<slug>/graph.json     { build, entries[] }
+ *   ~/.context-mcp/projects/<slug>/graph.json     { build }
  *   ~/.context-mcp/projects/<slug>/summary.json
  *   ~/.context-mcp/projects/<slug>/discussions.json
  */
@@ -58,7 +58,7 @@ export function runMigration({ dataDir, projectsDir, projectsPath, slugify, flus
   const oldDiscussions = readArr(legacyDiscussions,  'discussions');
   const oldGraphs      = readArr(legacyGraphs,       'graphs');
 
-  // Remap legacy type names to current 4-type schema
+  // Remap legacy type names to current schema (decision/bug/note/config/task/compaction)
   const TYPE_MAP = { architecture: 'note', code: 'note', error: 'bug', summary: 'compaction' };
   const remapType = entry => {
     if (TYPE_MAP[entry.type]) entry.type = TYPE_MAP[entry.type];
