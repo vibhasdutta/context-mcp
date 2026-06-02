@@ -1,80 +1,92 @@
 # Context-MCP — Codex CLI Usage Guide
 
 Persistent memory + codebase knowledge graph.
-Every conversation starts with `context.resume`. Every codebase question uses `codegraph_query`. Files only read for bugs/logic.
+`context.resume` starts every session. `codegraph_arch` shows module structure. `codegraph_query` finds specific symbols. Files only for bugs/logic.
 
 ---
 
 ## 1. Start of Every Conversation (MANDATORY)
 
-Call the `context` MCP tool with `action: "resume"`, `project: "<project-name>"` **before anything else**.
+Call `context` MCP tool: `action:"resume"`, `project:"<project>"` before anything else.
 
-Returns:
-- `recentEntries` — decisions, bugs, notes from previous conversations
-- `activePlans` — active AI-created plans for this project
-- `codegraph` — `{ built: true/false, nodes, edges, communities }`
+Returns: `recentEntries`, `activePlans`, `codegraph`, `stats.totalEntries`.
 
-Then:
-- `codegraph.built: true` → use `codegraph_query` before reading any files
-- `codegraph.built: false` → call `codegraph_build(path)` first, then proceed
+- `codegraph.built: true` → use graph tools before reading files
+- `codegraph.built: false` → call `codegraph_build(path)` first
+- `stats.totalEntries ≥ 20` → write compaction summary FIRST (see Rule 4)
+- `activePlans` non-empty → read them before starting new work
 
 ---
 
-## 2. When to Auto-Save Context
+## 2. Save Triggers (MANDATORY)
 
-**After graph build or rebuild** — every time `codegraph_build` completes:
-```
-context.save  type: "note"  title: "ContextGraph built — <project>"
-content: "nodes: X | edges: Y | communities: Z"
-```
+| Trigger | Type | Required fields |
+|---|---|---|
+| Task / fix / feature complete | `task` or `bug` | title, why, outcome, files[] |
+| Decision made | `decision` | title, why, outcome |
+| Discovery / constraint | `note` | title, content |
+| Config / env / deploy | `config` | title, content |
+| Graph build complete | `note` | nodes/edges/communities count |
+| User says "save this" | any | title, content |
 
-**User explicitly asks** — "save this", "remember this", "note that" → save immediately.
+Always include `why` (why it mattered) and `outcome` (what the result was) for task/bug/decision entries. Title up to 120 chars — be specific.
 
-**During plan / implementation / discussion / research** — save only when genuinely valuable:
-
-| What happened | Type |
-|--------------|------|
-| Approach / library / pattern decided | `decision` |
-| Bug found, root cause known, or fixed | `bug` |
-| Gotcha, constraint, discovery, structure understood | `note` |
-| Config / env var / secret / deploy step | `config` |
-
-Do NOT save: routine reads, search results, temporary debugging dead-ends.
-**Making any kind of plan** → call `plan.save` immediately with the plan summary and `planDir` pointing to your platform's plans folder.
-Need past info → `search` before asking. Always pass `project`.
+**Do NOT save:** routine reads, search results, explanations of existing code.
 
 ---
 
-## 3. ContextGraph Pipeline
+## 3. Plans (MANDATORY for multi-file work)
 
-> The knowledge graph is also called **ContextGraph**. The MCP tools use the `codegraph_*` prefix — both names refer to the same thing.
+**Create a plan when:** editing 2+ files, multi-step implementation, refactor, multi-file bug fix.
 
-### Step 1 — Build (once, fast, local)
-```
-codegraph_build(path)  →  AST graph: functions, classes, imports, edges
-```
+**Skip plan for:** single-file edits, questions, simple config tweaks.
 
-### Step 2 — Query (free, instant)
+1. Call `plan.save` with name, content, project before starting work
+2. Call `plan.update status:"done"` when complete
+
+On resume, check `activePlans` — do not create duplicate plans.
+
+---
+
+## 4. Auto-Summary at ≥ 20 Entries (MANDATORY)
+
+When `resume` returns `totalEntries ≥ 20`, call `context.save` BEFORE the user's task:
+
 ```
-codegraph_query(path, question)   →  fetch any details about the codebase
-codegraph_path(path, from, to)    →  shortest path
-codegraph_nodes(path, type)       →  list nodes by type
-codegraph_report(path)            →  full graph analysis
+type: "compaction"  title: "Session summary — <YYYY-MM-DD>"
+content: "<AI-written summary: what was built, decided, broke, current state>"
+tags: ["compaction", "auto"]  project: "<project>"
 ```
 
 ---
 
-## 4. Graph vs File
+## 5. Search Before Asking
 
-**Graph** — use for any question about what exists: finding functions, classes, files, dependencies, callers, imports, paths between concepts.
-**File** — bugs, logic, tracing unexpected behavior.
+Call `search` before asking user to re-explain past work.
 
 ---
 
-## 5. Rules
+## 6. ContextGraph Tools
 
-1. **`context.resume` first** — before any tool or response
-2. **Always pass `project`**
-3. **`search` before asking** — if user references past work
-4. **`codegraph_query` before reading files** — graph is faster and cheaper
-5. **Read files for bugs/logic only**
+```
+codegraph_build(path)                    → build AST graph (run once)
+codegraph_arch(path, limit?)             → module map: files, exports, imports
+codegraph_query(path, question?, node?)  → find symbol or answer structural question
+codegraph_nodes(path, type)              → list all nodes of a type
+codegraph_report(path)                   → structural analysis
+```
+
+Use `codegraph_arch` first for architecture overview. Use `codegraph_query` to find specific symbols. Never read files for structure questions.
+
+---
+
+## 7. Rules
+
+1. `context.resume` first — before any tool or response
+2. Always pass `project`
+3. Save on task complete — `why` + `outcome` + `files` required
+4. Summary at ≥ 20 entries — before starting task
+5. Plan before multi-file work — save + mark done
+6. Search before asking user about past work
+7. Graph tools before files — structure questions only
+8. Read files only for bugs/logic
