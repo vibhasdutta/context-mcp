@@ -237,6 +237,49 @@ def _general_search(matched: list, nodes: list, edges: list) -> dict:
     }
 
 
+def module_map(graph_dict: dict, limit: int = 100) -> dict:
+    """
+    Return a module map: for each file, its exported functions/classes and what it imports.
+    Output grouped by file, sorted by export count descending.
+    """
+    nodes = graph_dict.get("nodes", [])
+    edges = graph_dict.get("edges", [])
+
+    files: dict[str, dict] = {}
+    for n in nodes:
+        f = n.get("file") or "unknown"
+        if f not in files:
+            files[f] = {"exports": [], "imports": set()}
+        node_type = n.get("type", "?")
+        if node_type in ("function", "class", "struct"):
+            files[f]["exports"].append({"name": n["name"], "type": node_type})
+
+    node_map = {n["id"]: n for n in nodes}
+    for e in edges:
+        from_node = node_map.get(e.get("from", ""))
+        to_node   = node_map.get(e.get("to", ""))
+        if not from_node or not to_node:
+            continue
+        from_file = from_node.get("file") or "unknown"
+        to_file   = to_node.get("file") or "unknown"
+        if from_file != to_file and from_file in files:
+            files[from_file]["imports"].add(to_file)
+
+    result = []
+    for fpath, data in sorted(files.items(), key=lambda x: -len(x[1]["exports"])):
+        result.append({
+            "file":    fpath,
+            "exports": data["exports"][:30],
+            "imports": sorted(data["imports"])[:20],
+        })
+
+    return {
+        "files":       result[:limit],
+        "total_files": len(files),
+        "truncated":   len(files) > limit,
+    }
+
+
 def _render_subgraph(result_nodes: list, all_edges: list, token_budget: int) -> str:
     """
     Render a subgraph as structured plain text (graphify-style).

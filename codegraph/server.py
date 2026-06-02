@@ -25,7 +25,7 @@ from .config import classify_file
 from .cache import file_hash, set_cached_nodes, save_cache
 from .extractors.ast_extractor import extract as ast_extract
 from .graph.builder import build, to_json_dict, save_graph, load_graph
-from .graph.query import answer as graph_answer, find_path
+from .graph.query import answer as graph_answer, module_map
 from .graph.clustering import detect_communities
 from .report import generate as generate_report
 
@@ -95,16 +95,19 @@ TOOLS = [
         },
     ),
     Tool(
-        name="codegraph_path",
-        description="Find the shortest relationship path between two concepts in the graph.",
+        name="codegraph_arch",
+        description=(
+            "Return a module map: every file with its exported functions/classes and what it imports. "
+            "Use this to understand project structure without reading any files. "
+            "Call after codegraph_build. Much faster than reading each file."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
-                "path": {"type": "string"},
-                "from": {"type": "string"},
-                "to":   {"type": "string"},
+                "path":  {"type": "string", "description": "Project root"},
+                "limit": {"type": "integer", "description": "Max files in output (default 100)"},
             },
-            "required": ["path", "from", "to"],
+            "required": ["path"],
         },
     ),
 ]
@@ -125,12 +128,11 @@ async def call_tool(name: str, arguments: dict):
 
 
 async def _dispatch(name: str, args: dict):
-    if name == "codegraph_build":   return await _build(args)
-    if name == "codegraph_query":   return await _query(args)
-    if name == "codegraph_explain": return await _query(args)
-    if name == "codegraph_report":  return await _report(args)
-    if name == "codegraph_nodes":   return await _nodes(args)
-    if name == "codegraph_path":    return await _path(args)
+    if name == "codegraph_build":  return await _build(args)
+    if name == "codegraph_query":  return await _query(args)
+    if name == "codegraph_report": return await _report(args)
+    if name == "codegraph_nodes":  return await _nodes(args)
+    if name == "codegraph_arch":   return await _arch(args)
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -285,11 +287,12 @@ async def _nodes(args: dict) -> dict:
     return {"type": node_type, "count": len(matched), "nodes": matched[:limit]}
 
 
-async def _path(args: dict) -> dict:
+async def _arch(args: dict) -> dict:
     graph_dict = load_graph(args["path"])
     if not graph_dict:
         raise ValueError("No graph found. Run codegraph_build first.")
-    return find_path(args["from"], args["to"], graph_dict)
+    limit = args.get("limit", 100)
+    return module_map(graph_dict, limit=limit)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
