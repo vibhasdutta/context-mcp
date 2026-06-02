@@ -37,10 +37,12 @@ export const definition = {
     properties: {
       action:        { type: 'string', enum: ['resume', 'save', 'get', 'update', 'delete', 'list_projects'] },
       content:       { type: 'string' },
-      title:         { type: 'string' },
+      title:         { type: 'string', description: 'Up to 120 chars — be specific about what was done' },
+      why:           { type: 'string', description: 'Why this mattered — the problem it solved or constraint it revealed' },
+      outcome:       { type: 'string', description: 'What the result was — fix verified, feature shipped, decision finalized' },
       project:       { type: 'string' },
       rootPath:      { type: 'string', description: 'Absolute path to the project root directory. Stored on first call and used to sandbox file/git tool access.' },
-      type:          { type: 'string', enum: ['decision', 'bug', 'note', 'config'] },
+      type:          { type: 'string', enum: ['decision', 'bug', 'note', 'config', 'task', 'compaction'] },
       status:        { type: 'string', enum: ['active', 'archived'] },
       tags:          { type: 'array', items: { type: 'string' } },
       source:        { type: 'string', enum: ['user', 'ai-summary', 'file', 'web', 'cli', 'auto'] },
@@ -88,8 +90,20 @@ export async function handle(args, state) {
       if (proj) ensureProject(proj, resolvedRoot || undefined);
       state.projectRootPath = resolvedRoot;
 
-      const entries       = getContext({ project: proj, limit: 15, compact: true })
+      const rawEntries    = getContext({ project: proj, limit: 15, compact: false })
         .filter(e => e.status !== 'archived');
+      // Newest 5 get full content; older entries get a lightweight preview
+      const entries = rawEntries.map((e, i) => {
+        if (i < 5) return e;
+        return {
+          id: e.id, project: e.project, title: e.title, type: e.type,
+          status: e.status, tags: e.tags, source: e.source,
+          createdAt: e.createdAt, updatedAt: e.updatedAt,
+          ...(e.why     ? { why: e.why }         : {}),
+          ...(e.outcome ? { outcome: e.outcome }  : {}),
+          preview: (e.content || '').slice(0, 200),
+        };
+      });
       const discussions   = listDiscussions({ project: proj, status: 'active' });
       const allGraphs     = listGraphs();
       const np = p => (p || '').toLowerCase().replace(/\\/g, '/');
@@ -127,7 +141,7 @@ export async function handle(args, state) {
           ? `All file and git operations are sandboxed to: ${state.projectRootPath} — do not use paths outside this root.`
           : 'No project root configured — pass rootPath to restrict file/git access to a directory.',
         hint: graphStatus.built
-          ? `Graph ready (${graphStatus.nodes} nodes). Use codegraph_query for structural questions.`
+          ? `Graph ready (${graphStatus.nodes} nodes). Use codegraph_arch for module map, codegraph_query for specific symbol lookups.`
           : 'No graph built yet. Call codegraph_build on the project root to enable graph queries.',
       };
     }
