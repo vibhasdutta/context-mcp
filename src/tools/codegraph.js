@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { saveGraph, saveContext, updateContext, getContext } from '../db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT  = join(__dirname, '..', '..');
@@ -82,16 +83,18 @@ export const definitions = [
     },
   },
   {
-    name: 'codegraph_path',
-    description: 'Find the shortest relationship path between two concepts in the graph.',
+    name: 'codegraph_arch',
+    description:
+      'Return a module map of the project — every file with its exported functions/classes and its imports. ' +
+      'Use this to understand project structure without reading any files. ' +
+      'Call after codegraph_build. Much faster than reading each file individually.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string' },
-        from: { type: 'string' },
-        to:   { type: 'string' },
+        path:  { type: 'string', description: 'Project root' },
+        limit: { type: 'integer', description: 'Max files in output (default 100)' },
       },
-      required: ['path', 'from', 'to'],
+      required: ['path'],
     },
   },
 ];
@@ -103,46 +106,44 @@ export function handle(name, args, state) {
 
   // Persist graph metadata + save/update a context entry as a visible build record
   if (name === 'codegraph_build' && result.success) {
-    import('../db.js').then(({ saveGraph, saveContext, updateContext, getContext }) => {
-      saveGraph({
-        path:        args.path,
-        nodes:       result.nodes,
-        edges:       result.edges,
-        communities: result.communities,
-        cached:      result.cached,
-        changed:     result.changed,
-        time_ms:     result.time_ms,
-        summary:     result.summary || '',
+    saveGraph({
+      path:        args.path,
+      nodes:       result.nodes,
+      edges:       result.edges,
+      communities: result.communities,
+      cached:      result.cached,
+      changed:     result.changed,
+      time_ms:     result.time_ms,
+      summary:     result.summary || '',
+    });
+
+    const inferredProject = args.path
+      ? args.path.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop()
+      : null;
+    const project = state?.sessionProject || inferredProject || null;
+    const title   = `ContextGraph built — ${args.path}`;
+    const content = [
+      `nodes: ${result.nodes} | edges: ${result.edges} | communities: ${result.communities}`,
+      `cached: ${result.cached} | changed: ${result.changed} | time: ${result.time_ms}ms`,
+      result.summary || '',
+    ].filter(Boolean).join('\n');
+
+    const existing = getContext({ project, tags: ['codegraph'], limit: 100 })
+      .find(e => e.title === title);
+
+    if (existing) {
+      updateContext({ id: existing.id, content, status: 'active' });
+    } else {
+      saveContext({
+        project,
+        sessionId: state?.sessionId || null,
+        title,
+        content,
+        type:   'note',
+        source: 'auto',
+        tags:   ['codegraph', 'graph-build'],
       });
-
-      const inferredProject = args.path
-        ? args.path.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop()
-        : null;
-      const project = state?.sessionProject || inferredProject || null;
-      const title   = `CodeGraph — ${args.path}`;
-      const content = [
-        `nodes: ${result.nodes} | edges: ${result.edges} | communities: ${result.communities}`,
-        `cached: ${result.cached} | changed: ${result.changed} | time: ${result.time_ms}ms`,
-        result.summary || '',
-      ].filter(Boolean).join('\n');
-
-      const existing = getContext({ project, tags: ['codegraph'], limit: 100 })
-        .find(e => e.title === title);
-
-      if (existing) {
-        updateContext({ id: existing.id, content, status: 'active' });
-      } else {
-        saveContext({
-          project,
-          sessionId: state?.sessionId || null,
-          title,
-          content,
-          type:   'architecture',
-          source: 'auto',
-          tags:   ['codegraph', 'graph-build'],
-        });
-      }
-    }).catch(() => {});
+    }
   }
 
   return result;
