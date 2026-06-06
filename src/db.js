@@ -215,7 +215,7 @@ function flushProjectToDisk(name) {
   _flushFile(discussFilePath(name),   { discussions: data.discussions });
 }
 
-function flushToDisk() {
+export function flushToDisk() {
   if (!_dirty) return;
   _writeTimer = null;
 

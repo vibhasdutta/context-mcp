@@ -197,7 +197,7 @@ function cmdList(args) {
         const id   = item.id.slice(0, 8);
         const tags = safeTags(item.tags);
         const pipe = secIsLast ? ' ' : '│';
-        console.log(`  ${color(C.darkgray, pipe)}  ${color(C.darkgray, br)} ${pill(item.type || 'note')}  ${bold(item.title || '(no title)')}  ${faint('id:' + id)}  ${faint(date)}`);
+        console.log(`  ${color(C.darkgray, pipe)}  ${color(C.darkgray, br)} ${bold(item.title || '(no title)')}  ${faint('id:' + id)}  ${faint(date)}`);
         if (tags.length) console.log(`  ${color(C.darkgray, pipe)}     ${faint(tags.map(t => '#' + t).join(' '))}`);
       });
       if (!secIsLast) console.log(`  ${color(C.darkgray, '│')}`);
@@ -265,7 +265,7 @@ function cmdSearch(args) {
     const id     = entry.id.slice(0, 8);
     const type   = entry.type || 'note';
     const isLast = index === results.length - 1;
-    console.log(`  ${color(C.darkgray, isLast ? '└─' : '├─')} ${bold(entry.title || '(no title)')}${score}  ${pill(type)}  ${faint('id:' + id)}  ${faint(date)}`);
+    console.log(`  ${color(C.darkgray, isLast ? '└─' : '├─')} ${bold(entry.title || '(no title)')}${score}  ${faint('id:' + id)}  ${faint(date)}`);
   });
   console.log('');
   console.log(line());
@@ -304,9 +304,8 @@ function cmdProjects() {
       console.log(`  ${color(C.darkgray, '├─')} ${muted('recent')}`);
       entries.forEach((e, i) => {
         const br   = i === entries.length - 1 && !activeD.length ? '└─' : '├─';
-        const type = e.type || 'note';
         const date = (e.createdAt || '').slice(0, 10);
-        console.log(`  ${color(C.darkgray, '│')}  ${color(C.darkgray, br)} ${pill(type)}  ${bold(e.title || '(no title)')}  ${faint(date)}`);
+        console.log(`  ${color(C.darkgray, '│')}  ${color(C.darkgray, br)} ${bold(e.title || '(no title)')}  ${faint(date)}`);
       });
     }
 
@@ -691,6 +690,15 @@ async function cmdInstall(args) {
       } else {
         console.log(`  ${ok('✓')} Python environment ready — codegraph enabled`);
       }
+    }
+    // Bootstrap store structure — creates ~/.context-mcp/, projects/, contextconfig.json
+    console.log(`  ${bold(lblue('Store'))}`);
+    try {
+      getConfig(); // triggers DATA_DIR creation + contextconfig.json generation
+      console.log(`  ${ok('✓')} store ready          ${faint(getStorePath())}`);
+      console.log(`  ${ok('✓')} config ready         ${faint(getConfigPath())}`);
+    } catch (e) {
+      console.log(`  ${bad('✗')} store init failed: ${faint(e.message)}`);
     }
     console.log('');
     return;

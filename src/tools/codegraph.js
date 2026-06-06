@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { saveGraph, saveContext, updateContext, getContext } from '../db.js';
+import { saveGraph, saveContext, updateContext, getContext, flushToDisk } from '../db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT  = join(__dirname, '..', '..');
@@ -116,6 +116,7 @@ export function handle(name, args, state) {
       time_ms:     result.time_ms,
       summary:     result.summary || '',
     });
+    flushToDisk(); // write graph.json to disk immediately so ctx list sees it
 
     const inferredProject = args.path
       ? args.path.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop()
@@ -128,7 +129,8 @@ export function handle(name, args, state) {
       result.summary || '',
     ].filter(Boolean).join('\n');
 
-    const existing = getContext({ project, tags: ['codegraph'], limit: 100 })
+    // Search all projects — same path always produces same title regardless of session
+    const existing = getContext({ tags: ['codegraph'], limit: 100 })
       .find(e => e.title === title);
 
     if (existing) {
