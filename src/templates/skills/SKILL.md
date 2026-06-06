@@ -16,6 +16,16 @@ Persistent memory + codebase knowledge graph across every conversation.
 
 ---
 
+## Subcommands
+
+When invoked with an argument, act immediately:
+
+**`/context-mcp resume`** — call `context` tool with `action:"resume"`, infer `project` from cwd, pass `rootPath`. Report what was returned.
+
+**`/context-mcp save`** — call `context` tool with `action:"save"` to save the most recent thing worth keeping from this conversation. Use `type:"note"`, fill in `title`, `why`, `outcome`, `files` from context. Confirm what was saved.
+
+---
+
 ## MANDATORY: Start of Every Conversation
 
 Call `context` tool **before any tool or response** with:
@@ -31,54 +41,47 @@ Returns:
 
 Then:
 - `codegraph.built: true` → use `codegraph_arch` for structure overview, `codegraph_query` for specific lookups
-- `codegraph.built: false` → call `codegraph_build(path)` first, then proceed
+- `codegraph.built: false` → call `codegraph_build(path)` first
 
 ---
 
 ## When to Save Context (MANDATORY TRIGGERS)
 
-### Always save — no judgment needed
-
-**A. Task / fix / feature complete**
-Any time you finish implementing something — call `context.save` immediately:
+Call `context.save` with `type: "note"` after finishing anything worth keeping:
 
 ```
 context.save
   project: "<project>"
-  title:   "<what was done — up to 120 chars, be specific>"
-  why:     "<what problem this solved or why it mattered>"
-  outcome: "<result: fixed/shipped/verified + which files changed>"
-  type:    "task" | "bug" | "decision"
-  files:   ["src/file.js", ...]   ← required for task/bug types
+  title:   "<what was done — up to 120 chars>"
+  why:     "<why it mattered>"
+  outcome: "<what the result was>"
+  files:   ["src/file.js", ...]
 ```
 
-**B. Decision made** → `type: "decision"` with `why` explaining tradeoffs.
+**Save immediately after:**
+- Task / fix / feature complete
+- Decision made (architecture, library, approach)
+- Discovery — non-obvious behavior, constraint, gotcha
+- Config / env / deploy info
+- Graph build complete — include nodes/edges count in content
+- User says "save this" / "remember this"
 
-**C. Discovery / gotcha** → `type: "note"` — non-obvious behavior, constraint, env requirement.
+**Manual compaction** — "compact now", "compress memory", "clean up context":
+Save a full session summary as `type: "compaction"`. Server removes old entries using it.
 
-**D. Config / deploy** → `type: "config"` — env vars, deploy steps, secrets.
-
-**E. Graph build complete** → save `type:"note"` with nodes/edges/communities count.
-
-**F. Explicit user request** → "save this", "remember this" → save immediately.
-
-**G. Manual compaction** → "compact now", "compress memory", "clean up context" → write full session summary, save as `type:"compaction"`. Server removes old entries using your text.
-
-### Do NOT save
-Routine file reads, search results, explanations of existing code, dead-end debugging.
+**Do NOT save:** routine reads, search results, explanations of existing code, dead-end debugging.
 
 ---
 
 ## Plans (MANDATORY for multi-file work)
 
-**Create a plan when:** editing 2+ files, multi-step implementation, refactor, or multi-file bug fix.
+**Create a plan when:** editing 2+ files, multi-step implementation, refactor, multi-file bug fix.
 
 **Skip plan for:** single-file edits, questions, simple config tweaks.
 
-**Lifecycle:**
 1. `plan.save` with name, content, project, planDir — before starting work
 2. Work through plan
-3. `plan.update status:"done"` when complete
+3. `plan.update status:"done"` when complete — deletes the plan
 
 On `resume`, check `activePlans` — do not duplicate in-progress work.
 
@@ -90,8 +93,8 @@ When `resume` returns `stats.totalEntries ≥ 20`, call `context.save` **before 
 
 ```
 type: "compaction"  title: "Session summary — <date>"
-content: "<AI-written: what was built, decided, broke, current state>"
-tags: ["compaction", "auto"]  project: "<project>"
+content: "<what was built, decided, broke, current state>"
+project: "<project>"
 ```
 
 ---
@@ -117,8 +120,6 @@ codegraph_nodes(path, type)              → list all nodes of a type
 codegraph_report(path)                   → god nodes, clusters, structural analysis
 ```
 
-### When to use which
-
 | Question | Tool |
 |---|---|
 | Architecture overview / what files exist | `codegraph_arch` |
@@ -132,11 +133,9 @@ codegraph_report(path)                   → god nodes, clusters, structural ana
 ## Rules
 
 1. `context.resume` first — before any tool or response
-2. Always pass `project` — never save to global unless truly cross-project
-3. Save on task complete — mandatory, `why` + `outcome` + `files` required
-4. Summary at ≥ 20 entries — write before starting task
-5. Plan for multi-file work — save before starting, mark done on complete
-6. Search before asking — if user references past work
-7. `codegraph_arch` for architecture — before reading files for structure questions
-8. `codegraph_query` for specific lookups — before reading files for "where is X"
-9. Read files only for bugs/logic
+2. Always pass `project`
+3. Save on task complete — `why` + `outcome` + `files`
+4. Compaction at ≥ 20 entries — before starting task
+5. Plan for multi-file work — `status:"done"` deletes it
+6. Search before asking about past work
+7. Graph tools before files

@@ -20,17 +20,17 @@ Returns: `recentEntries`, `activePlans`, `codegraph`, `stats.totalEntries`.
 
 ## 2. Save Triggers (MANDATORY)
 
-| Trigger | Type | Required fields |
-|---|---|---|
-| Task / fix / feature complete | `task` or `bug` | title, why, outcome, files[] |
-| Decision made | `decision` | title, why, outcome |
-| Discovery / constraint | `note` | title, content |
-| Config / env / deploy | `config` | title, content |
-| Graph build complete | `note` | nodes/edges/communities count |
-| User says "save this" | any | title, content |
-| "compact now" / "compress memory" / "clean up context" | `compaction` | full session summary as content |
+Call `context.save` with `type: "note"` after finishing anything worth keeping:
 
-Always include `why` (why it mattered) and `outcome` (what the result was) for task/bug/decision entries. Title up to 120 chars — be specific.
+| Trigger | Required fields |
+|---|---|
+| Task / fix / feature complete | title, why, outcome, files[] |
+| Decision made | title, why, outcome |
+| Discovery / constraint / gotcha | title, content |
+| Config / env / deploy info | title, content |
+| Graph build complete | title, content (nodes/edges count) |
+| User says "save this" | title, content |
+| "compact now" / "compress memory" | `type:"compaction"`, full session summary |
 
 **Do NOT save:** routine reads, search results, explanations of existing code.
 
@@ -40,23 +40,21 @@ Always include `why` (why it mattered) and `outcome` (what the result was) for t
 
 **Create a plan when:** editing 2+ files, multi-step implementation, refactor, multi-file bug fix.
 
-**Skip plan for:** single-file edits, questions, simple config tweaks.
+1. Call `plan.save` with name, content, project before starting
+2. Call `plan.update status:"done"` when complete — deletes the plan
 
-1. Call `plan.save` with name, content, project before starting work
-2. Call `plan.update status:"done"` when complete
-
-On resume, check `activePlans` — do not create duplicate plans.
+Check `activePlans` on resume — don't create duplicates.
 
 ---
 
 ## 4. Auto-Summary at ≥ 20 Entries (MANDATORY)
 
-When `resume` returns `totalEntries ≥ 20`, call `context.save` BEFORE the user's task:
+When `totalEntries ≥ 20`, call `context.save` BEFORE the user's task:
 
 ```
 type: "compaction"  title: "Session summary — <YYYY-MM-DD>"
-content: "<AI-written summary: what was built, decided, broke, current state>"
-tags: ["compaction", "auto"]  project: "<project>"
+content: "<what was built, decided, broke, current state>"
+project: "<project>"
 ```
 
 ---
@@ -77,7 +75,7 @@ codegraph_nodes(path, type)              → list all nodes of a type
 codegraph_report(path)                   → structural analysis
 ```
 
-Use `codegraph_arch` first for architecture overview. Use `codegraph_query` to find specific symbols. Never read files for structure questions.
+Use `codegraph_arch` first. Never read files for structure questions.
 
 ---
 
@@ -85,9 +83,8 @@ Use `codegraph_arch` first for architecture overview. Use `codegraph_query` to f
 
 1. `context.resume` first — before any tool or response
 2. Always pass `project`
-3. Save on task complete — `why` + `outcome` + `files` required
-4. Summary at ≥ 20 entries — before starting task
-5. Plan before multi-file work — save + mark done
-6. Search before asking user about past work
-7. Graph tools before files — structure questions only
-8. Read files only for bugs/logic
+3. Save on task complete — `why` + `outcome` + `files`
+4. Compaction at ≥ 20 entries — before starting task
+5. Plan before multi-file work — `status:"done"` deletes it
+6. Search before asking about past work
+7. Graph tools before files

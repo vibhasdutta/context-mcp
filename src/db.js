@@ -20,7 +20,6 @@ import {
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { runMigration } from './migrator.js';
 
 const DATA_DIR     = process.env.CONTEXT_MCP_DIR || join(homedir(), '.context-mcp');
 const PROJECTS_DIR = join(DATA_DIR, 'projects');
@@ -75,7 +74,6 @@ let _dirtyProjects = new Set();
 let _dirty = false;
 let _writeTimer = null;
 let _generation = 0;
-let _migrated = false;
 
 // ── File I/O helpers ─────────────────────────────────────────────────────────
 
@@ -140,21 +138,6 @@ function loadProjectsIndex() {
     _projectsIndex = Array.isArray(d.projects) ? d.projects : [];
   } catch { _projectsIndex = []; }
   return _projectsIndex;
-}
-
-// ── Migration ─────────────────────────────────────────────────────────────────
-
-function migrate() {
-  if (_migrated) return;
-  _migrated = true;
-  runMigration({
-    dataDir:       DATA_DIR,
-    projectsDir:   PROJECTS_DIR,
-    projectsPath:  PROJECTS_PATH,
-    slugify,
-    flushFile:     _flushFile,
-    projectsIndex: loadProjectsIndex(),
-  });
 }
 
 // ── Per-project data loading ─────────────────────────────────────────────────
@@ -253,11 +236,8 @@ process.on('exit', flushToDisk);
 process.on('SIGINT',  () => { flushToDisk(); process.exit(); });
 process.on('SIGTERM', () => { flushToDisk(); process.exit(); });
 
-// ── Initialise: run migration lazily on first access ─────────────────────────
-
 function init() {
   loadProjectsIndex();
-  migrate();
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -302,7 +282,24 @@ function compactEntry(e) {
 
 // ── Context entries ──────────────────────────────────────────────────────────
 
-const VALID_TYPES = new Set(['decision', 'bug', 'note', 'config', 'task', 'compaction']);
+const VALID_TYPES = new Set(['note', 'compaction']);
+
+function computeImportance({ files = [], why = '', outcome = '', tags = [], type } = {}) {
+  if (type === 'compaction') return 5;
+  let score = 0;
+  if (Array.isArray(files) && files.length > 0) score += 2;
+  if (why && why.trim()) score += 1;
+  if (outcome && outcome.trim()) score += 1;
+  if (Array.isArray(tags) && tags.some(t => t === 'plan' || t === 'decision')) score += 1;
+  return score;
+}
+
+const _SECRET_PATTERN = /("?(?:api[-_]?key|password|passwd|pwd|token|secret|authorization|auth_token|access_token|refresh_token|bearer|cookie|signature|private[-_]?key|client[-_]?secret)"?\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
+
+function redactSecrets(text) {
+  if (typeof text !== 'string') return text;
+  return text.replace(_SECRET_PATTERN, '$1[REDACTED]');
+}
 
 export function saveContext({ project, content, why = '', outcome = '', tags = [], source = 'user', title = '',
   type = 'note', status = 'active', files = [], codeRefs = [],
@@ -313,6 +310,8 @@ export function saveContext({ project, content, why = '', outcome = '', tags = [
   const data = loadProjectData(projectName);
   const now = new Date().toISOString();
   const validatedType = VALID_TYPES.has(type) ? type : 'note';
+  const normalizedFiles = Array.isArray(files) ? files : [];
+  const normalizedTags = normalizeTags(tags);
   const entry = {
     id: randomUUID(),
     project: projectName,
@@ -321,15 +320,16 @@ export function saveContext({ project, content, why = '', outcome = '', tags = [
     nodeType: 'entry',
     version: 1,
     title: truncate(title, 120),
-    content: truncate(content, MAX_CONTENT_LENGTH),
-    why: truncate(why || '', 300),
-    outcome: truncate(outcome || '', 300),
+    content: redactSecrets(truncate(content, MAX_CONTENT_LENGTH)),
+    why: redactSecrets(truncate(why || '', 300)),
+    outcome: redactSecrets(truncate(outcome || '', 300)),
     type: validatedType,
     status,
-    tags: normalizeTags(tags),
+    tags: normalizedTags,
     source: normalizeSource(source),
-    files: Array.isArray(files) ? files : [],
+    files: normalizedFiles,
     codeRefs: Array.isArray(codeRefs) ? codeRefs : [],
+    importance: computeImportance({ files: normalizedFiles, why, outcome, tags: normalizedTags, type: validatedType }),
     discussionId: null,
     createdAt: now,
     updatedAt: null,
@@ -834,9 +834,17 @@ export function compactProject(project, summaryContent, { skipSummaryEntry = fal
   init();
   const proj = project || 'global';
   const data = loadProjectData(proj);
+  const now = Date.now();
   const entries = data.context
     .filter(e => e.type !== 'compaction')  // never remove existing compaction summaries
-    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    .sort((a, b) => {
+      // Higher score = more expendable; oldest + least important drops first
+      const ageDaysA = (now - new Date(a.createdAt || 0).getTime()) / 86_400_000;
+      const ageDaysB = (now - new Date(b.createdAt || 0).getTime()) / 86_400_000;
+      const scoreA = ageDaysA * 0.7 + (5 - (a.importance ?? 0)) * 0.3;
+      const scoreB = ageDaysB * 0.7 + (5 - (b.importance ?? 0)) * 0.3;
+      return scoreB - scoreA;
+    });
   if (entries.length < COMPACTION_TARGET) return null;
   const toRemove = new Set(entries.slice(0, COMPACTION_TARGET).map(e => e.id));
   const removed = entries.filter(e => toRemove.has(e.id));

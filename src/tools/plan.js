@@ -82,6 +82,11 @@ export async function handle(args, state) {
 
     case 'update': {
       if (!args.name && !args.id) throw new Error('name or id is required for update');
+      if (args.status === 'done') {
+        const result = deleteDiscussion({ name: args.name, id: args.id });
+        state.discussionId = null;
+        return { success: true, message: `Plan "${args.name || args.id}" completed and removed.` };
+      }
       const updated = updateDiscussion({
         name:    args.name,
         id:      args.id,
@@ -91,13 +96,12 @@ export async function handle(args, state) {
         tags:    args.tags,
       });
       if (!updated) throw new Error(`No plan found for "${args.name || args.id}".`);
-      if (updated.status !== 'active' && state.discussionId === updated.id) state.discussionId = null;
       if (updated.status === 'active') state.discussionId = updated.id;
       const filePath = writePlanFile(args.planDir, updated.name, updated.content, updated.title);
       return {
-        success: true, id: updated.id, name: updated.name, status: updated.status,
+        success: true, id: updated.id, name: updated.name,
         filePath: filePath || undefined,
-        message: `Plan "${updated.name}" updated (${updated.status}).`,
+        message: `Plan "${updated.name}" updated.`,
       };
     }
 

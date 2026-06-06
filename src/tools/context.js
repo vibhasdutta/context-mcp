@@ -42,7 +42,7 @@ export const definition = {
       outcome:       { type: 'string', description: 'What the result was' },
       project:       { type: 'string' },
       rootPath:      { type: 'string', description: 'Absolute path to the project root directory. Stored on first call and used to sandbox file/git tool access.' },
-      type:          { type: 'string', enum: ['decision', 'bug', 'note', 'config', 'task', 'compaction'] },
+      type:          { type: 'string', enum: ['note', 'compaction'] },
       status:        { type: 'string', enum: ['active', 'archived'] },
       tags:          { type: 'array', items: { type: 'string' } },
       source:        { type: 'string', enum: ['user', 'ai-summary', 'file', 'web', 'cli', 'auto'] },

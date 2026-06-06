@@ -107,14 +107,13 @@ function printSection(title, meta = '') {
 function printUsage() {
   printBanner();
 
-  // Terminal commands (ctx / context ...)
-  printSection('Terminal commands', 'run from your shell  (ctx … or context …)');
+  printSection('Commands');
   const cmd = (c, desc) => console.log(`  ${accent(c.padEnd(40))} ${faint(desc)}`);
   cmd('ctx',                           'open interactive mode');
   cmd('ctx list [project]',            'list entries + discussions + graphs');
   cmd('ctx search <query>',            'keyword → semantic fallback search');
   cmd('ctx add',                       'add entry interactively');
-  cmd('ctx save --title "..." --content "..." --project <p> --type <t>', 'save entry non-interactively (for scripts/hooks)');
+  cmd('ctx save --title "…" --content "…" --project <p> --type <t>', 'non-interactive save (scripts/hooks)');
   cmd('ctx delete <id-prefix>',        'delete one entry');
   cmd('ctx delete project <name|id>',  'delete all entries for a project');
   cmd('ctx summary [project]',         'summarize recent entries');
@@ -130,22 +129,6 @@ function printUsage() {
   cmd('ctx settings',                  'view and edit config (port, host, client id/secret)');
   cmd('ctx update',                    'check for and apply latest version');
   cmd('ctx help',                      'show this screen');
-  console.log('');
-
-  // Interactive mode commands (no prefix needed)
-  printSection('Interactive mode', 'type these inside the UI — no "ctx" prefix needed');
-  const icmd = (c, desc) => console.log(`  ${accent(c.padEnd(40))} ${faint(desc)}`);
-  icmd('list [project]',               'list entries');
-  icmd('search <query>',               'search context');
-  icmd('add',                          'add entry');
-  icmd('projects',                     'show all projects');
-  icmd('discuss [project]',            'show discussions');
-  icmd('summary [project]',            'summarize recent entries');
-  icmd('stats',                        'storage report');
-  icmd('install --<platform>',         'install for a platform');
-  icmd('settings',                     'edit config');
-  icmd('clear',                        'clear screen');
-  icmd('exit / quit / q',              'exit interactive mode');
   console.log('');
 }
 function clearScreen() {
@@ -969,7 +952,7 @@ async function cmdAdd(existingRl) {
   const content = await ask('Content:');
   const project = await ask('Project (blank = global):');
   const tagsRaw = await ask('Tags (comma-separated):');
-  const type    = await ask('Type (note/decision/bug/config/task/compaction):');
+  const type    = await ask('Type (note/compaction):');
 
   if (!existingRl) rl.close();
   if (!content.trim()) { console.log(`  ${bad('✗')} content required`); return; }
