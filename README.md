@@ -11,7 +11,7 @@
 
 Persistent memory and codebase knowledge graph for AI coding assistants — delivered as a single MCP server.
 
-One shared context store across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Claude.ai, and ChatGPT. Save context from one AI, pick it up in another.
+One shared context store across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Antigravity IDE, Claude.ai, and ChatGPT. Save context from one AI, pick it up in another.
 
 ---
 
@@ -77,8 +77,15 @@ ctx install --cursor      # Cursor
 ctx install --vscode      # VS Code Copilot
 ctx install --gemini      # Gemini CLI
 ctx install --codex       # Codex CLI
-ctx install --windsurf    # Windsurf
+ctx install --windsurf      # Windsurf
+ctx install --antigravity   # Antigravity IDE
 ```
+
+For Codex project installs, `ctx install --codex` writes:
+
+- `.codex/config.toml` with `[mcp_servers.context-mcp]` MCP configuration.
+- `AGENTS.md` with Context-MCP usage rules for Codex.
+- `.codex/hooks/` pre/post shell hook scripts for project-local Codex sessions.
 
 For web clients (Claude.ai, ChatGPT), start the HTTP server:
 
@@ -113,8 +120,9 @@ ctx online                     # start HTTP server (idempotent)
 ctx online --restart           # force stop + restart
 ctx settings                   # view and edit config interactively
 
-# Tools
-ctx benchmark                  # token savings report (memory + graph)
+# Install
+ctx install --initial          # install / update Node.js + Python deps
+ctx install --all              # write config + rules for all platforms
 ```
 
 ---
@@ -152,18 +160,32 @@ Any file or git operation outside that directory is rejected. Applies to all HTT
 codegraph_build(path)
 ```
 
-Parses codebase via tree-sitter AST (16 languages, regex fallback). Extracts functions, classes, imports, call edges. Build metadata saved to `~/.context-mcp/projects/<name>/graph.json`.
+Parses codebase via tree-sitter AST (16 languages, regex fallback). Extracts functions, classes, imports, and call edges. Automatically generates visualizations on every build. Metadata saved to `<project>/codegraph-cache/`.
 
 **Step 2 — Query** (instant, forever):
 
 ```
+codegraph_arch(path, limit?)              → module map: every file, its exports, its imports
 codegraph_query(path, question?, node?)   → structural question OR single-node lookup (or both)
-codegraph_path(path, from, to)            → shortest path between two concepts
 codegraph_nodes(path, type)               → list all nodes of a type
 codegraph_report(path)                    → god nodes, clusters, surprising connections
+codegraph_affected(path, node, depth?)    → BFS blast radius — what breaks if you change X?
 ```
 
-`codegraph_query` accepts `question` (natural language), `node` (exact/partial name for type + file + deps + callers), or both in one call. Use before reading any files.
+`codegraph_query` accepts `question` (natural language), `node` (exact/partial name), or both. Use before reading any files.
+
+**Step 3 — Visualize** (auto-generated on every build):
+
+```
+codegraph_html(path, formats?)            → regenerate visualizations on demand
+```
+
+Every `codegraph_build` automatically writes to `<project>/codegraph-cache/`:
+- `graph.html` — interactive vis.js force graph (dark theme, search, community toggle)
+- `tree.html` — D3 collapsible file hierarchy
+- `callflow.html` — Mermaid architecture diagrams per community
+- `graph.graphml` — Gephi / yEd export
+- `obsidian/` — per-node `.md` vault with `[[wikilinks]]`
 
 ### File & Git Tools
 

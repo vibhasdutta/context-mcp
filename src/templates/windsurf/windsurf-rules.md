@@ -64,10 +64,12 @@ Call `search` before asking user to re-explain past work.
 ## 6. ContextGraph Tools
 
 ```
-codegraph_arch(path)          → module map (files, exports, imports)
-codegraph_query(path, ...)    → find specific function/class/file
-codegraph_nodes(path, type)   → list all nodes of a type
-codegraph_report(path)        → structural analysis
+codegraph_arch(path)                   → module map (files, exports, imports)
+codegraph_query(path, ...)             → find specific function/class/file
+codegraph_nodes(path, type)            → list all nodes of a type
+codegraph_report(path)                 → structural analysis
+codegraph_affected(path, node, depth?) → blast radius — what breaks if X changes?
+codegraph_html(path, formats?)         → regenerate visualizations (auto on every build)
 ```
 
 Use `codegraph_arch` first. Never read files for structure questions.

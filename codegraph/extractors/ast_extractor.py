@@ -282,18 +282,24 @@ def _extract_with_treesitter(source: bytes, rel_path: str, cfg: dict) -> list[di
 
     nodes: list[dict] = []
     seen:  set[str]   = set()
+    node_by_name: dict[str, dict] = {}
 
-    def _add(name: str, ntype: str, line: int):
+    def _add(name: str, ntype: str, line: int) -> dict | None:
         if not name or name in seen:
-            return
+            return None
         seen.add(name)
-        nodes.append({
-            "id":   f"{rel_path}::{ntype}::{name}",
-            "name": name,
-            "type": ntype,
-            "file": rel_path,
-            "line": line + 1,
-        })
+        entry = {
+            "id":      f"{rel_path}::{ntype}::{name}",
+            "name":    name,
+            "type":    ntype,
+            "file":    rel_path,
+            "line":    line + 1,
+            "calls":   [],
+            "imports": [],
+        }
+        nodes.append(entry)
+        node_by_name[name] = entry
+        return entry
 
     for node in _walk(root, cfg["function_types"]):
         name = _get_name(node, cfg["name_field"])
@@ -304,6 +310,30 @@ def _extract_with_treesitter(source: bytes, rel_path: str, cfg: dict) -> list[di
         name = _get_name(node, cfg["name_field"])
         if name:
             _add(name, "class", node.start_point[0])
+
+    # Associate call expressions with their enclosing function
+    for node in _walk(root, cfg["call_types"]):
+        callee = _get_call_name(node, cfg["call_field"])
+        if not callee:
+            continue
+        enclosing = _find_enclosing_function(node, cfg["function_types"], cfg["name_field"])
+        if enclosing and enclosing in node_by_name:
+            calls_list = node_by_name[enclosing]["calls"]
+            if callee not in calls_list:
+                calls_list.append(callee)
+
+    # Collect file-level imports and attach to every node in this file
+    import_names: list[str] = []
+    for node in _walk(root, cfg["import_types"]):
+        text = node.text.decode("utf-8", errors="ignore").strip()
+        m = re.match(r'(?:import|from)\s+([\w./"\']+)', text)
+        if m:
+            raw = m.group(1).strip("\"'").split(".")[0].split("/")[-1]
+            if raw and raw not in import_names:
+                import_names.append(raw)
+    if import_names:
+        for entry in nodes:
+            entry["imports"] = import_names[:]
 
     return nodes
 
@@ -382,16 +412,106 @@ _EXT_TO_LANG_NAME: dict[str, str] = {
 }
 
 
+# Generic call pattern: word immediately followed by (
+_CALL_RE = re.compile(r'\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(')
+
+# Language-specific import patterns (group 1 or 2 = module name)
+_IMPORT_RE: dict[str, re.Pattern] = {
+    "javascript": re.compile(
+        r'(?:import\s+[\s\S]*?from\s+["\']([^"\']+)["\']'
+        r'|require\s*\(\s*["\']([^"\']+)["\']\s*\))',
+        re.MULTILINE,
+    ),
+    "typescript": re.compile(
+        r'(?:import\s+[\s\S]*?from\s+["\']([^"\']+)["\']'
+        r'|require\s*\(\s*["\']([^"\']+)["\']\s*\))',
+        re.MULTILINE,
+    ),
+    "python": re.compile(
+        r'^\s*(?:import\s+([\w.]+)|from\s+([\w.]+)\s+import)',
+        re.MULTILINE,
+    ),
+    "go": re.compile(r'"([^"]+)"', re.MULTILINE),
+    "rust": re.compile(r'use\s+([\w:]+)', re.MULTILINE),
+    "java": re.compile(r'import\s+([\w.]+)', re.MULTILINE),
+    "csharp": re.compile(r'using\s+([\w.]+)', re.MULTILINE),
+}
+
+# Keywords that look like calls but aren't
+_KEYWORD_BLACKLIST = {
+    "if", "for", "while", "switch", "catch", "function", "class",
+    "return", "typeof", "instanceof", "new", "await", "async",
+    "import", "export", "from", "let", "const", "var",
+}
+
+
+def _collect_imports_regex(source: str, lang: str) -> list[str]:
+    pat = _IMPORT_RE.get(lang)
+    if not pat:
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    for m in pat.finditer(source):
+        raw = next((g for g in m.groups() if g), None)
+        if not raw:
+            continue
+        # Keep only the last path component / first dotted segment
+        stem = raw.replace("\\", "/").split("/")[-1].split(".")[0].strip("'\"")
+        if stem and stem not in seen:
+            seen.add(stem)
+            names.append(stem)
+    return names
+
+
+def _attach_calls_brace(lines: list[str], func_nodes: list[dict]) -> None:
+    """Brace-count scope tracker: assign call-expression names to enclosing function."""
+    # Sort functions by line
+    funcs = sorted(func_nodes, key=lambda n: n["line"])
+    if not funcs:
+        return
+
+    # Stack: list of (func_node, brace_depth_at_entry)
+    stack: list[tuple[dict, int]] = []
+    depth = 0
+    func_idx = 0
+
+    for line_no, line in enumerate(lines, 1):
+        # Push any functions that start on this line
+        while func_idx < len(funcs) and funcs[func_idx]["line"] == line_no:
+            stack.append((funcs[func_idx], depth))
+            func_idx += 1
+
+        depth += line.count("{") - line.count("}")
+
+        # Pop functions whose scope has closed
+        while stack and depth < stack[-1][1]:
+            stack.pop()
+
+        # Collect calls on this line and attach to innermost function
+        if stack:
+            current = stack[-1][0]
+            for m in _CALL_RE.finditer(line):
+                callee = m.group(1)
+                if callee in _KEYWORD_BLACKLIST or callee == current["name"]:
+                    continue
+                calls = current["calls"]
+                if callee not in calls:
+                    calls.append(callee)
+
+
 def _extract_with_regex(source: str, rel_path: str, ext: str) -> list[dict]:
     lang = _EXT_TO_LANG_NAME.get(ext.lower())
     if not lang or lang not in _REGEX_PATTERNS:
         return []
 
     patterns = _REGEX_PATTERNS[lang]
+    lines = source.splitlines()
     nodes: list[dict] = []
-    seen: set[str]    = set()
+    seen: set[str] = set()
 
-    for line_no, line in enumerate(source.splitlines(), 1):
+    import_names = _collect_imports_regex(source, lang)
+
+    for line_no, line in enumerate(lines, 1):
         for ntype, pattern in patterns.items():
             if not pattern:
                 continue
@@ -401,12 +521,19 @@ def _extract_with_regex(source: str, rel_path: str, ext: str) -> list[dict]:
                 if name and name not in seen:
                     seen.add(name)
                     nodes.append({
-                        "id":   f"{rel_path}::{ntype}::{name}",
-                        "name": name,
-                        "type": ntype,
-                        "file": rel_path,
-                        "line": line_no,
+                        "id":      f"{rel_path}::{ntype}::{name}",
+                        "name":    name,
+                        "type":    ntype,
+                        "file":    rel_path,
+                        "line":    line_no,
+                        "calls":   [],
+                        "imports": import_names[:],
                     })
+
+    func_nodes = [n for n in nodes if n["type"] == "function"]
+    if func_nodes:
+        _attach_calls_brace(lines, func_nodes)
+
     return nodes
 
 

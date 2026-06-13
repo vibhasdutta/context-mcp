@@ -68,11 +68,13 @@ Call `search` before asking user to re-explain past work.
 ## 6. ContextGraph Tools
 
 ```
-codegraph_build(path)                    → build AST graph (run once)
+codegraph_build(path)                    → build AST graph + auto-generate all visualizations
 codegraph_arch(path, limit?)             → module map: files, exports, imports
 codegraph_query(path, question?, node?)  → find symbol or answer structural question
 codegraph_nodes(path, type)              → list all nodes of a type
 codegraph_report(path)                   → structural analysis
+codegraph_affected(path, node, depth?)   → blast radius BFS — what breaks if X changes?
+codegraph_html(path, formats?)           → regenerate visualizations on demand
 ```
 
 Use `codegraph_arch` first. Never read files for structure questions.

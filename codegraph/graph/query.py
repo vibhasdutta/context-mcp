@@ -41,6 +41,8 @@ def answer(question: str, graph_dict: dict, token_budget: int = 2000) -> dict:
         result = _describe_god_nodes(god_nodes, nodes)
     elif intent == "community" and matched:
         result = _describe_community(matched[0], communities, nodes)
+    elif intent == "circular":
+        result = _circular_imports(graph_dict)
     else:
         result = _general_search(matched, nodes, edges)
 
@@ -124,6 +126,8 @@ def _detect_intent(q: str) -> str:
         return "god_nodes"
     if any(w in q for w in ("community", "cluster", "group", "module")):
         return "community"
+    if any(w in q for w in ("circular", "cycle", "cyclic", "recursive import")):
+        return "circular"
     return "general"
 
 
@@ -221,6 +225,58 @@ def _describe_community(node: dict, communities: list, nodes: list) -> dict:
     return {
         "text": f"{node['name']} is in community '{comm['label']}' with {len(members)} members.",
         "nodes": members[:10],
+        "confidence": "high",
+    }
+
+
+def _circular_imports(graph_dict: dict) -> dict:
+    """Find circular import chains using iterative DFS on import edges."""
+    edges = graph_dict.get("edges", [])
+    nodes = graph_dict.get("nodes", [])
+    node_map = {n["id"]: n for n in nodes}
+
+    adj: dict[str, list[str]] = {}
+    for e in edges:
+        if e.get("relation") in ("imports", "imports_from"):
+            adj.setdefault(e["from"], []).append(e["to"])
+
+    cycles: list[list[str]] = []
+    visited: set[str] = set()
+
+    def dfs(start: str) -> None:
+        stack = [(start, [start], {start})]
+        while stack and len(cycles) < 5:
+            node, path, path_set = stack.pop()
+            for nb in adj.get(node, []):
+                if nb in path_set:
+                    cycle_start = path.index(nb)
+                    cycles.append(path[cycle_start:] + [nb])
+                    if len(cycles) >= 5:
+                        return
+                elif nb not in visited:
+                    visited.add(nb)
+                    stack.append((nb, path + [nb], path_set | {nb}))
+
+    for nid in list(adj.keys()):
+        if nid not in visited:
+            visited.add(nid)
+            dfs(nid)
+        if len(cycles) >= 5:
+            break
+
+    if not cycles:
+        return {"text": "No circular imports detected.", "nodes": [], "confidence": "high"}
+
+    cycle_node_ids: list[str] = []
+    lines = [f"Found {len(cycles)} circular import chain(s):"]
+    for cycle in cycles[:5]:
+        names = [node_map.get(nid, {}).get("name", nid) for nid in cycle]
+        lines.append(f"  {' → '.join(names)}")
+        cycle_node_ids.extend(nid for nid in cycle if nid in node_map)
+
+    return {
+        "text":       "\n".join(lines),
+        "nodes":      [node_map[nid] for nid in dict.fromkeys(cycle_node_ids)][:20],
         "confidence": "high",
     }
 

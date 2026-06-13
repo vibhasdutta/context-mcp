@@ -10,6 +10,7 @@ Format: { "rel/path": { "hash": "...", "nodes": [...], "extracted_at": "..." } }
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -113,6 +114,18 @@ def file_hash(path: str) -> str:
     return h.hexdigest()
 
 
+def stat_hit(path: str, cache_entry: dict) -> bool:
+    """Return True if (size, mtime_ns) matches the cached stat — skips SHA-256."""
+    cached_stat = cache_entry.get("stat")
+    if not cached_stat:
+        return False
+    try:
+        s = os.stat(path)
+        return cached_stat == [s.st_size, s.st_mtime_ns]
+    except OSError:
+        return False
+
+
 def get_cached_nodes(cache: dict, rel_path: str, current_hash: str) -> list | None:
     """Return cached nodes if hash matches, else None."""
     entry = cache.get(rel_path)
@@ -121,12 +134,48 @@ def get_cached_nodes(cache: dict, rel_path: str, current_hash: str) -> list | No
     return None
 
 
-def set_cached_nodes(cache: dict, rel_path: str, file_hash_val: str, nodes: list) -> None:
-    cache[rel_path] = {
+def get_cached_nodes_fast(cache: dict, rel_path: str, abs_path: str) -> list | None:
+    """Return cached nodes using stat fastpath, falling back to SHA-256 check.
+
+    Avoids reading and hashing large files on incremental rebuilds where
+    the file hasn't changed — (size, mtime_ns) is checked first.
+    Returns None if the file is new or has changed.
+    """
+    entry = cache.get(rel_path)
+    if not entry:
+        return None
+    # Fast path: stat match skips SHA-256
+    if stat_hit(abs_path, entry):
+        return entry.get("nodes", [])
+    # Slow path: full hash check
+    try:
+        h = file_hash(abs_path)
+    except OSError:
+        return None
+    if entry.get("hash") == h:
+        # Update stat so next call is fast
+        try:
+            s = os.stat(abs_path)
+            entry["stat"] = [s.st_size, s.st_mtime_ns]
+        except OSError:
+            pass
+        return entry.get("nodes", [])
+    return None
+
+
+def set_cached_nodes(cache: dict, rel_path: str, file_hash_val: str, nodes: list, abs_path: str | None = None) -> None:
+    entry: dict = {
         "hash":         file_hash_val,
         "nodes":        nodes,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
     }
+    if abs_path:
+        try:
+            s = os.stat(abs_path)
+            entry["stat"] = [s.st_size, s.st_mtime_ns]
+        except OSError:
+            pass
+    cache[rel_path] = entry
 
 
 def remove_deleted(cache: dict, existing_rel_paths: set) -> list:

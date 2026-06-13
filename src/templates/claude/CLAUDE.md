@@ -112,6 +112,8 @@ codegraph_arch(path, limit?)             → module map: every file, its exports
 codegraph_query(path, question?, node?)  → find function/class/file or answer structural question
 codegraph_nodes(path, type)              → list all nodes of a type
 codegraph_report(path)                   → god nodes, clusters, structural analysis
+codegraph_affected(path, node, depth?)   → blast radius BFS — what breaks if X changes?
+codegraph_html(path, formats?)           → regenerate visualizations (auto-runs on every build)
 ```
 
 | Question | Tool |
@@ -121,6 +123,7 @@ codegraph_report(path)                   → god nodes, clusters, structural ana
 | What does module Y depend on? | `codegraph_query question:"what does Y import?"` |
 | What are all the classes? | `codegraph_nodes type:"class"` |
 | Most connected files? | `codegraph_report` |
+| What breaks if I change X? | `codegraph_affected node:"X"` |
 
 **Never read files for structure questions — use graph tools first.**
 

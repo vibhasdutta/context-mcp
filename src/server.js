@@ -1,7 +1,13 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { getConfig } from './config.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const { version } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
 
 import * as contextTool    from './tools/context.js';
 import * as searchTool     from './tools/search.js';
@@ -23,7 +29,7 @@ export function createServer({ enableFileTools = false, enableGitTools = getConf
   };
 
   const server = new Server(
-    { name: 'context-mcp', version: '1.0.0' },
+    { name: 'context-mcp', version },
     { capabilities: { tools: {} } }
   );
 

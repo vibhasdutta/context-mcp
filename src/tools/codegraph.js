@@ -97,6 +97,43 @@ export const definitions = [
       required: ['path'],
     },
   },
+  {
+    name: 'codegraph_affected',
+    description:
+      'BFS traversal: given a node name, find every node that would be affected if you change it — ' +
+      'callers, importers, inheritors, etc. Use before refactoring to understand blast radius. ' +
+      'Returns affected nodes with file paths, relation types, and traversal depth.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path:  { type: 'string', description: 'Project root' },
+        node:  { type: 'string', description: 'Node name, ID, or file path to start from' },
+        depth: { type: 'integer', description: 'BFS depth (default 2, max 5)' },
+      },
+      required: ['path', 'node'],
+    },
+  },
+  {
+    name: 'codegraph_html',
+    description:
+      'Generate interactive visualizations from the knowledge graph. ' +
+      'Outputs: graph.html (vis.js force graph, dark theme, search, community toggle), ' +
+      'tree.html (D3 collapsible file tree), callflow.html (Mermaid architecture diagrams), ' +
+      'graph.graphml (Gephi/yEd), obsidian/ vault (per-node .md with wikilinks). ' +
+      'Run after codegraph_build. Pass formats array to select specific outputs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path:    { type: 'string', description: 'Project root' },
+        formats: {
+          type: 'array',
+          items: { type: 'string', enum: ['html', 'tree', 'callflow', 'graphml', 'obsidian'] },
+          description: 'Formats to generate (default: all)',
+        },
+      },
+      required: ['path'],
+    },
+  },
 ];
 
 export const TOOL_NAMES = new Set(definitions.map(d => d.name));

@@ -88,6 +88,16 @@ def build(all_nodes: list[dict]) -> "nx.DiGraph | dict":
                            relation=rel.get("relation", "relates-to"),
                            confidence=rel.get("confidence", "INFERRED"))
 
+    # Resolve unresolved call targets from node['calls'] lists
+    try:
+        from codegraph.graph.symbol_resolution import resolve_calls
+        existing_keys = {(u, v) for u, v in G.edges()}
+        new_edges = resolve_calls(all_nodes, existing_keys)
+        for e in new_edges:
+            G.add_edge(e["from"], e["to"], relation=e["relation"], confidence=e["confidence"])
+    except Exception:
+        pass
+
     return G
 
 

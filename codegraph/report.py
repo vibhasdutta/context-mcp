@@ -84,8 +84,61 @@ def _build_report(g: dict) -> str:
     lines += ["## Confidence Breakdown", ""]
     for label, count in sorted(conf_counts.items()):
         lines.append(f"- **{label}**: {count} edges")
+    lines.append("")
+
+    # Knowledge gaps
+    lines += _knowledge_gaps_section(nodes, edges, communities, node_map)
 
     return "\n".join(lines)
+
+
+def _knowledge_gaps_section(
+    nodes: list, edges: list, communities: list, node_map: dict
+) -> list[str]:
+    """Identify under-connected areas: isolated nodes, thin communities, ambiguous edges."""
+    lines = ["## Knowledge Gaps", ""]
+
+    # Isolated nodes (no edges at all)
+    connected_ids: set[str] = set()
+    for e in edges:
+        connected_ids.add(e.get("from", ""))
+        connected_ids.add(e.get("to", ""))
+    isolated = [n for n in nodes if n["id"] not in connected_ids]
+    if isolated:
+        lines.append(f"**Isolated nodes** ({len(isolated)} with no edges):")
+        for n in isolated[:8]:
+            lines.append(f"  - `{n.get('name', n['id'])}` in `{n.get('file', '?')}`")
+        if len(isolated) > 8:
+            lines.append(f"  - …and {len(isolated) - 8} more")
+    else:
+        lines.append("_No isolated nodes._")
+    lines.append("")
+
+    # Thin communities (single-node clusters)
+    thin = [c for c in communities if len(c.get("members", [])) == 1]
+    if thin:
+        lines.append(f"**Thin communities** ({len(thin)} single-node clusters):")
+        for c in thin[:5]:
+            nid = c["members"][0]
+            n = node_map.get(nid, {})
+            lines.append(f"  - `{n.get('name', nid)}` in `{n.get('file', '?')}`")
+        if len(thin) > 5:
+            lines.append(f"  - …and {len(thin) - 5} more")
+    else:
+        lines.append("_No thin communities._")
+    lines.append("")
+
+    # High-ambiguity edges
+    ambiguous = [e for e in edges if e.get("confidence") == "AMBIGUOUS"]
+    if ambiguous and edges:
+        pct = round(100 * len(ambiguous) / len(edges), 1)
+        lines.append(f"**Ambiguous edges**: {len(ambiguous)} of {len(edges)} ({pct}%) "
+                     "have low-confidence resolution — consider adding type annotations.")
+    else:
+        lines.append("_No ambiguous edges._")
+    lines.append("")
+
+    return lines
 
 
 def _cross_module_edges(edges: list, node_map: dict) -> list[tuple]:

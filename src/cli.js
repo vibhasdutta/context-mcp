@@ -119,7 +119,6 @@ function printUsage() {
   cmd('ctx summary [project]',         'summarize recent entries');
   cmd('ctx projects',                  'show all projects + graphs');
   cmd('ctx discuss [project]',         'show discussions');
-  cmd('ctx stats',                     'storage report: entries, types, graph status');
   console.log('');
   cmd('ctx install --initial',         'install / update Node.js + Python (codegraph) deps only');
   cmd('ctx install --<platform>',      'write MCP config + skill/rules file only (no uv/npm)');
@@ -386,60 +385,6 @@ function cmdSummary(args) {
   console.log('');
 }
 
-// ── Benchmark ────────────────────────────────────────────────────────────────
-
-
-function cmdStats() {
-  const projects   = listProjects();
-  const graphs     = listGraphs();
-  const allEntries = getContext({ limit: 2000, compact: false });
-
-  printSection('Stats', 'context-mcp storage report');
-
-  // ── Projects ──────────────────────────────────────────────────────────────────
-  console.log(`\n  ${bold(lblue('Projects'))}`);
-  if (!projects.length) {
-    console.log(`    ${faint('no projects yet')}`);
-  } else {
-    for (const p of projects) {
-      const g = graphs.find(gr => {
-        const gp = (gr.path || '').replace(/\\/g, '/').replace(/\/$/, '').split('/').pop();
-        return gp === p.name;
-      });
-      const graphStatus = g ? ok(`graph: ${g.nodes} nodes, ${g.edges} edges`) : faint('no graph');
-      const builtAt = g?.builtAt ? faint('  built ' + g.builtAt.slice(0, 10)) : '';
-      console.log(`    ${bold(p.name.padEnd(24))} ${muted(String(p.count).padStart(3) + ' entries')}  ${graphStatus}${builtAt}`);
-    }
-  }
-
-  // ── Entry type breakdown ──────────────────────────────────────────────────────
-  console.log(`\n  ${bold(lblue('Entries by type'))}`);
-  if (!allEntries.length) {
-    console.log(`    ${faint('no entries yet')}`);
-  } else {
-    const byType = {};
-    for (const e of allEntries) { byType[e.type] = (byType[e.type] || 0) + 1; }
-    for (const [type, count] of Object.entries(byType).sort((a, b) => b[1] - a[1])) {
-      const bar = color(C.dblue, '█'.repeat(Math.min(count, 20))) + color(C.darkgray, '░'.repeat(Math.max(0, 20 - count)));
-      console.log(`    ${type.padEnd(14)} ${bar}  ${muted(count)}`);
-    }
-  }
-
-  // ── Storage summary ───────────────────────────────────────────────────────────
-  const compactions = allEntries.filter(e => e.type === 'compaction').length;
-  const avgSize = allEntries.length
-    ? Math.round(allEntries.reduce((s, e) => s + (e.content || '').length, 0) / allEntries.length)
-    : 0;
-
-  console.log(`\n  ${bold(lblue('Storage'))}`);
-  console.log(`    ${faint('total entries:  ')} ${muted(allEntries.length)}`);
-  console.log(`    ${faint('compactions:    ')} ${muted(compactions)}`);
-  console.log(`    ${faint('avg entry size: ')} ${muted(avgSize + ' chars')}`);
-  console.log(`    ${faint('graphs built:   ')} ${muted(graphs.length)}`);
-  console.log('');
-}
-
-
 // ── Install ───────────────────────────────────────────────────────────────────
 
 const TPLS = join(__dirname, 'templates');
@@ -469,6 +414,7 @@ const _GLOBAL_GITIGNORE_ENTRIES = [
   '.gemini/',
   '.codex/',
   '.windsurf/',
+  '.agents/',
   // Build outputs and session artifacts
   'codegraph-cache/',
   '.mcp.json',
@@ -483,6 +429,7 @@ function _graphForProject(graphs, projectName) {
 
 const _PROJECT_GITIGNORE_ENTRIES = [
   '.claude/', '.cursor/', '.vscode/', '.gemini/', '.codex/',
+  '.agents/',
   'codegraph-cache/', '.mcp.json', 'CLAUDE.md', 'GEMINI.md', 'AGENTS.md',
 ];
 
@@ -525,7 +472,7 @@ function _updateGlobalGitignore() {
 }
 
 function _writeCommands(baseDir) {
-  const cmdsDir = join(TPLS, 'commands');
+  const cmdsDir = join(TPLS, 'claude', 'commands');
   const destDir = join(baseDir, '.claude', 'commands');
   for (const [name, label] of [
     ['context-resume.md', '/context-resume'],
@@ -541,20 +488,136 @@ function _writeCommands(baseDir) {
 
 const MCP_SERVER_CMD = { command: 'npx', args: ['-y', 'context-mcp-server@latest'] };
 
+function _tomlString(value) {
+  return JSON.stringify(value);
+}
+
+function _copyHooks(platform, dotDir, dir, hookFiles) {
+  const hooksSrc = join(TPLS, platform, 'hooks');
+  const hooksDest = join(dir, dotDir, 'hooks');
+  for (const file of hookFiles) {
+    const src = join(hooksSrc, file);
+    if (existsSync(src)) {
+      _writeFile(join(hooksDest, file), readFileSync(src, 'utf8'), `${dotDir}/hooks/${file}`);
+    }
+  }
+}
+
+function _copyCodexHooks(dir) {
+  _copyHooks('codex', '.codex', dir, [
+    'context-mcp-pre-tool-use.js',
+    'context-mcp-post-tool-use.js',
+  ]);
+}
+
+// Read JSON from path (returns {} on missing/invalid), run mutateFn, write back.
+function _mergeJsonFile(filePath, label, mutateFn) {
+  let obj = {};
+  try { obj = JSON.parse(readFileSync(filePath, 'utf8')); } catch {}
+  mutateFn(obj);
+  _writeFile(filePath, JSON.stringify(obj, null, 2), label);
+  return obj;
+}
+
+// Merge `entries` ({ EventName: [hookGroup] }) into an existing settings.json
+// hooks object, replacing any previously installed context-mcp groups.
+function _mergeHooksIntoSettings(settingsPath, entries, label) {
+  let settings = {};
+  try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')); } catch {}
+  settings.hooks = settings.hooks || {};
+  for (const [event, groups] of Object.entries(entries)) {
+    const existing = Array.isArray(settings.hooks[event]) ? settings.hooks[event] : [];
+    settings.hooks[event] = existing
+      .filter(g => !(g.hooks || []).some(h => String(h.command || '').includes('context-mcp-')))
+      .concat(groups);
+  }
+  _writeFile(settingsPath, JSON.stringify(settings, null, 2), label);
+  return settings;
+}
+
+function _codexConfigToml(dir, includeHooks = false) {
+  const lines = [
+    '[mcp_servers.context-mcp]',
+    'command = "npx"',
+    'args    = ["-y", "context-mcp-server@latest"]',
+    'default_tools_approval_mode = "prompt"',
+    '',
+    '[mcp_servers.context-mcp.tools.context]',
+    'approval_mode = "approve"',
+    '',
+    '[mcp_servers.context-mcp.tools.search]',
+    'approval_mode = "approve"',
+    '',
+    '[mcp_servers.context-mcp.tools.codegraph_query]',
+    'approval_mode = "approve"',
+  ];
+
+  if (includeHooks) {
+    const preHook = join(dir, '.codex', 'hooks', 'context-mcp-pre-tool-use.js');
+    const postHook = join(dir, '.codex', 'hooks', 'context-mcp-post-tool-use.js');
+    lines.push(
+      '',
+      '[[hooks.PreToolUse]]',
+      'matcher = "^Bash$"',
+      '',
+      '[[hooks.PreToolUse.hooks]]',
+      'type = "command"',
+      `command = ${_tomlString(`node ${_tomlString(preHook)}`)}`,
+      `command_windows = ${_tomlString(`node ${_tomlString(preHook)}`)}`,
+      'timeout = 30',
+      'statusMessage = "Checking shell command"',
+      '',
+      '[[hooks.PostToolUse]]',
+      'matcher = "^Bash$"',
+      '',
+      '[[hooks.PostToolUse.hooks]]',
+      'type = "command"',
+      `command = ${_tomlString(`node ${_tomlString(postHook)}`)}`,
+      `command_windows = ${_tomlString(`node ${_tomlString(postHook)}`)}`,
+      'timeout = 30',
+      'statusMessage = "Saving failed shell context"',
+    );
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
 const PLATFORMS = {
   claude: {
     label: 'Claude Code',
     restartNote: 'Type /context-resume in Claude Code to start using context-mcp.',
     install(dir, scope) {
-      // Install as a skill (global, works across all projects) instead of a flat CLAUDE.md
-      const skillSrc = join(TPLS, 'skills', 'SKILL.md');
+      // Skill — user-global, works across all projects
+      const skillSrc = join(TPLS, 'claude', 'skills', 'SKILL.md');
       const skillDest = join(homedir(), '.claude', 'skills', 'context-mcp', 'SKILL.md');
       if (existsSync(skillSrc)) {
         _writeFile(skillDest, readFileSync(skillSrc, 'utf8'), '~/.claude/skills/context-mcp/');
       }
-      // Slash commands are always user-global (not project-scoped)
+      // Slash commands — user-global
       _writeCommands(homedir());
-      // Register via claude CLI so the server is trusted immediately (no manual trust prompt)
+      // Hooks — write into the appropriate settings.json scope
+      // Project hooks live in .claude/hooks/ and are committed; user hooks in ~/.claude/hooks/
+      const hooksBase = scope === 'project' ? dir : homedir();
+      _copyHooks('claude', '.claude', hooksBase, [
+        'context-mcp-pre-tool-use.js',
+        'context-mcp-post-tool-use.js',
+      ]);
+      const preHook = join(hooksBase, '.claude', 'hooks', 'context-mcp-pre-tool-use.js');
+      const postHook = join(hooksBase, '.claude', 'hooks', 'context-mcp-post-tool-use.js');
+      const settingsPath = scope === 'project'
+        ? join(dir, '.claude', 'settings.json')
+        : join(homedir(), '.claude', 'settings.json');
+      _mergeHooksIntoSettings(settingsPath, {
+        PreToolUse: [{
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: preHook, timeout: 30, statusMessage: 'Checking shell command' }],
+        }],
+        PostToolUse: [{
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: postHook, timeout: 30, statusMessage: 'Saving failed shell context' }],
+        }],
+      }, scope === 'project' ? '.claude/settings.json' : '~/.claude/settings.json');
+      // Register MCP server via claude CLI
       const scopeFlag = scope === 'global' ? 'user' : 'project';
       const reg = spawnSync(
         'claude', ['mcp', 'add', '--scope', scopeFlag, 'context-mcp', '--', 'npx', '-y', 'context-mcp-server@latest'],
@@ -571,17 +634,34 @@ const PLATFORMS = {
     label: 'Cursor',
     restartNote: 'Restart Cursor to load the new MCP server.',
     install(dir, scope) {
+      // MCP config
       const mcpJson = JSON.stringify({ mcpServers: { 'context-mcp': MCP_SERVER_CMD } }, null, 2);
       _writeFile(join(dir, '.cursor', 'mcp.json'), mcpJson, '.cursor/mcp.json');
       if (scope === 'project') {
-        const mdc = _tpl('cursor-rules.mdc');
+        // Rules
+        const mdc = _tpl('cursor/cursor-rules.mdc');
         if (mdc) _writeFile(join(dir, '.cursor', 'rules', 'context-mcp.mdc'), mdc, '.cursor/rules/context-mcp.mdc');
+        // Slash commands
+        const cmdsSrc = join(TPLS, 'cursor', 'commands');
+        for (const file of ['context-resume.md', 'graph-build.md', 'save-context.md']) {
+          const src = join(cmdsSrc, file);
+          if (existsSync(src)) _writeFile(join(dir, '.cursor', 'commands', file), readFileSync(src, 'utf8'), `.cursor/commands/${file}`);
+        }
+        // Hook script
+        _copyHooks('cursor', '.cursor', dir, ['context-mcp-post-tool-use.js']);
+        const hookPath = join(dir, '.cursor', 'hooks', 'context-mcp-post-tool-use.js');
+        // Merge into .cursor/hooks.json (must keep "version": 1)
+        _mergeJsonFile(join(dir, '.cursor', 'hooks.json'), '.cursor/hooks.json', obj => {
+          obj.version = 1;
+          obj.hooks = obj.hooks || {};
+          const strip = arr => (arr || []).filter(h => !String(h.command || '').includes('context-mcp-'));
+          obj.hooks.postToolUse = strip(obj.hooks.postToolUse).concat([
+            { command: `node "${hookPath}"`, timeout: 30 },
+          ]);
+        });
       }
-      // Try to enable via cursor CLI (enable/disable only — no add command)
-      const reg = spawnSync(
-        'cursor', ['agent', 'mcp', 'enable', 'context-mcp'],
-        { encoding: 'utf8', shell: true },
-      );
+      // Try to enable via cursor CLI
+      const reg = spawnSync('cursor', ['agent', 'mcp', 'enable', 'context-mcp'], { encoding: 'utf8', shell: true });
       if (reg.status === 0) {
         console.log(`  ${ok('✓')} ${'enabled via cursor agent mcp'.padEnd(28)}`);
       }
@@ -590,21 +670,79 @@ const PLATFORMS = {
   vscode: {
     label: 'VS Code Copilot',
     restartNote: 'Reload VS Code window (Ctrl+Shift+P → "Reload Window").',
-    install(dir) {
+    install(dir, scope) {
+      // MCP config
       const mcpJson = JSON.stringify({
         servers: { 'context-mcp': { type: 'stdio', ...MCP_SERVER_CMD } },
       }, null, 2);
       _writeFile(join(dir, '.vscode', 'mcp.json'), mcpJson, '.vscode/mcp.json');
+      if (scope === 'project') {
+        // Prompt files (.github/prompts/)
+        const cmdsSrc = join(TPLS, 'vscode', 'commands');
+        for (const file of ['context-resume.prompt.md', 'graph-build.prompt.md', 'save-context.prompt.md']) {
+          const src = join(cmdsSrc, file);
+          if (existsSync(src)) _writeFile(join(dir, '.github', 'prompts', file), readFileSync(src, 'utf8'), `.github/prompts/${file}`);
+        }
+        // Hook script
+        _copyHooks('vscode', '.vscode', dir, ['context-mcp-post-tool-use.js']);
+        const hookPath = join(dir, '.vscode', 'hooks', 'context-mcp-post-tool-use.js');
+        // Merge hooks into .vscode/settings.json under github.copilot.chat.agent.hooks
+        _mergeJsonFile(join(dir, '.vscode', 'settings.json'), '.vscode/settings.json', obj => {
+          const hooks = obj['github.copilot.chat.agent.hooks'] || {};
+          const strip = arr => (arr || []).filter(h => !String(h.command || '').includes('context-mcp-'));
+          hooks.PostToolUse = strip(hooks.PostToolUse).concat([
+            { type: 'command', command: `node "${hookPath}"`, timeout: 30, windows: `node "${hookPath}"` },
+          ]);
+          obj['github.copilot.chat.agent.hooks'] = hooks;
+        });
+      }
     },
   },
   gemini: {
     label: 'Gemini CLI',
     restartNote: 'Restart your Gemini CLI session.',
     install(dir, scope) {
-      const cfg = JSON.stringify({ mcpServers: { 'context-mcp': MCP_SERVER_CMD } }, null, 2);
-      _writeFile(join(dir, '.gemini', 'settings.json'), cfg, '.gemini/settings.json');
+      // MCP server config — merged into existing settings.json
+      const settingsPath = scope === 'project'
+        ? join(dir, '.gemini', 'settings.json')
+        : join(homedir(), '.gemini', 'settings.json');
+      let settings = {};
+      try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')); } catch {}
+      settings.mcpServers = settings.mcpServers || {};
+      settings.mcpServers['context-mcp'] = MCP_SERVER_CMD;
+      // Hooks — write BeforeTool/AfterTool into settings.json
+      const hooksBase = scope === 'project' ? dir : homedir();
+      _copyHooks('gemini', '.gemini', hooksBase, [
+        'context-mcp-before-tool.js',
+        'context-mcp-after-tool.js',
+      ]);
+      const beforeHook = join(hooksBase, '.gemini', 'hooks', 'context-mcp-before-tool.js');
+      const afterHook = join(hooksBase, '.gemini', 'hooks', 'context-mcp-after-tool.js');
+      settings.hooks = settings.hooks || {};
+      const stripOld = (arr) => (arr || []).filter(
+        g => !(g.hooks || []).some(h => String(h.command || '').includes('context-mcp-')),
+      );
+      settings.hooks.BeforeTool = stripOld(settings.hooks.BeforeTool).concat([{
+        matcher: 'run_shell_command',
+        hooks: [{ type: 'command', command: `node ${beforeHook}`, timeout: 30 }],
+      }]);
+      settings.hooks.AfterTool = stripOld(settings.hooks.AfterTool).concat([{
+        matcher: 'run_shell_command',
+        hooks: [{ type: 'command', command: `node ${afterHook}`, timeout: 30 }],
+      }]);
+      _writeFile(settingsPath,
+        JSON.stringify(settings, null, 2),
+        scope === 'project' ? '.gemini/settings.json' : '~/.gemini/settings.json',
+      );
+      // Slash commands (.toml) — project-scoped only
       if (scope === 'project') {
-        const md = _tpl('GEMINI.md');
+        const cmdsSrc = join(TPLS, 'gemini', 'commands');
+        const cmdsDest = join(dir, '.gemini', 'commands');
+        for (const file of ['context-resume.toml', 'graph-build.toml', 'save-context.toml']) {
+          const src = join(cmdsSrc, file);
+          if (existsSync(src)) _writeFile(join(cmdsDest, file), readFileSync(src, 'utf8'), `.gemini/commands/${file}`);
+        }
+        const md = _tpl('gemini/GEMINI.md');
         if (md) _writeFile(join(dir, 'GEMINI.md'), md, 'GEMINI.md');
       }
     },
@@ -613,11 +751,20 @@ const PLATFORMS = {
     label: 'Codex CLI',
     restartNote: 'Restart your Codex CLI session.',
     install(dir, scope) {
-      const toml = `[[mcp_servers]]\nname    = "context-mcp"\ncommand = "npx"\nargs    = ["-y", "context-mcp-server@latest"]\n`;
-      _writeFile(join(dir, '.codex', 'config.toml'), toml, '.codex/config.toml');
+      const includeHooks = scope === 'project';
+      if (includeHooks) _copyCodexHooks(dir);
+      _writeFile(join(dir, '.codex', 'config.toml'), _codexConfigToml(dir, includeHooks), '.codex/config.toml');
       if (scope === 'project') {
-        const md = _tpl('AGENTS.md');
+        const md = _tpl('codex/AGENTS.md');
         if (md) _writeFile(join(dir, 'AGENTS.md'), md, 'AGENTS.md');
+      }
+      // Prompts (slash commands) — always user-global; Codex only loads ~/.codex/prompts/
+      const promptsSrc = join(TPLS, 'codex', 'prompts');
+      for (const file of ['context-resume.md', 'graph-build.md', 'save-context.md']) {
+        const src = join(promptsSrc, file);
+        if (existsSync(src)) {
+          _writeFile(join(homedir(), '.codex', 'prompts', file), readFileSync(src, 'utf8'), `~/.codex/prompts/${file}`);
+        }
       }
       // Register via codex CLI so server is active immediately
       const reg = spawnSync(
@@ -634,15 +781,63 @@ const PLATFORMS = {
   windsurf: {
     label: 'Windsurf',
     restartNote: 'Restart Windsurf to load the updated MCP config.',
-    install(dir) {
-      const rules = _tpl('windsurf-rules.md');
+    install(dir, scope) {
+      // Rules file
+      const rules = _tpl('windsurf/windsurf-rules.md');
       if (rules) _writeFile(join(dir, '.windsurf', 'rules', 'context-mcp.md'), rules, '.windsurf/rules/context-mcp.md');
-      const globalCfgPath = join(homedir(), '.codeium', 'windsurf', 'mcp_config.json');
-      let existing = {};
-      try { existing = JSON.parse(readFileSync(globalCfgPath, 'utf8')); } catch {}
-      existing.mcpServers = existing.mcpServers || {};
-      existing.mcpServers['context-mcp'] = { command: 'npx', args: ['-y', 'context-mcp-server@latest'] };
-      _writeFile(globalCfgPath, JSON.stringify(existing, null, 2), '~/.codeium/windsurf/mcp_config.json');
+      // Global MCP config (~/.codeium/windsurf/mcp_config.json)
+      _mergeJsonFile(join(homedir(), '.codeium', 'windsurf', 'mcp_config.json'), '~/.codeium/windsurf/mcp_config.json', obj => {
+        obj.mcpServers = obj.mcpServers || {};
+        obj.mcpServers['context-mcp'] = { command: 'npx', args: ['-y', 'context-mcp-server@latest'] };
+      });
+      if (scope === 'project') {
+        // Workflows (slash commands)
+        const wfSrc = join(TPLS, 'windsurf', 'workflows');
+        for (const file of ['context-resume.md', 'graph-build.md', 'save-context.md']) {
+          const src = join(wfSrc, file);
+          if (existsSync(src)) _writeFile(join(dir, '.windsurf', 'workflows', file), readFileSync(src, 'utf8'), `.windsurf/workflows/${file}`);
+        }
+        // Hook script + .windsurf/hooks.json
+        _copyHooks('windsurf', '.windsurf', dir, ['context-mcp-post-run-command.js']);
+        const hookPath = join(dir, '.windsurf', 'hooks', 'context-mcp-post-run-command.js');
+        _mergeJsonFile(join(dir, '.windsurf', 'hooks.json'), '.windsurf/hooks.json', obj => {
+          obj.hooks = obj.hooks || {};
+          const strip = arr => (arr || []).filter(h => !String(h.command || '').includes('context-mcp-'));
+          obj.hooks.post_run_command = strip(obj.hooks.post_run_command).concat([{
+            command: `node "${hookPath}"`,
+            powershell: `node "${hookPath}"`,
+            show_output: false,
+          }]);
+        });
+      }
+    },
+  },
+  antigravity: {
+    label: 'Antigravity IDE',
+    restartNote: 'Restart your Antigravity session to pick up hooks and rules.',
+    install(dir, scope) {
+      // Antigravity uses stdio-incompatible MCP transport — integrate via ctx CLI + GEMINI.md instead.
+      if (scope === 'project') {
+        // Post-tool hook — saves failed tool calls to context-mcp via ctx CLI
+        _copyHooks('antigravity', '.agents', dir, ['context-mcp-post-tool-use.js']);
+        const hookPath = join(dir, '.agents', 'hooks', 'context-mcp-post-tool-use.js');
+        _mergeJsonFile(join(dir, '.agents', 'hooks.json'), '.agents/hooks.json', obj => {
+          const strip = arr => (arr || []).filter(h => !String(h.command || '').includes('context-mcp-'));
+          obj.hooks = strip(obj.hooks).concat([{
+            event: 'PostToolUse',
+            command: `node "${hookPath}"`,
+          }]);
+        });
+        // Workflows (slash commands) — .agents/workflows/
+        const wfSrc = join(TPLS, 'antigravity', 'workflows');
+        for (const file of ['context-resume.md', 'graph-build.md', 'save-context.md']) {
+          const src = join(wfSrc, file);
+          if (existsSync(src)) _writeFile(join(dir, '.agents', 'workflows', file), readFileSync(src, 'utf8'), `.agents/workflows/${file}`);
+        }
+        // Rules file — Antigravity reads GEMINI.md at project root
+        const md = _tpl('antigravity/GEMINI.md');
+        if (md) _writeFile(join(dir, 'GEMINI.md'), md, 'GEMINI.md');
+      }
     },
   },
 };
@@ -706,7 +901,7 @@ async function cmdInstall(args) {
 
   if (!keys.length) {
     printSection('Install');
-    console.log(`  ${muted('Usage:')}  ctx install ${faint('[--initial] [--claude] [--cursor] [--vscode] [--gemini] [--codex] [--windsurf] [--all]')}`);
+    console.log(`  ${muted('Usage:')}  ctx install ${faint('[--initial] [--claude] [--cursor] [--vscode] [--gemini] [--codex] [--windsurf] [--antigravity] [--all]')}`);
     console.log('');
     console.log(`  ${accent('--initial      ')}  ${faint('Install / update Node.js + Python (codegraph) deps')}`);
     console.log('');
@@ -1100,8 +1295,6 @@ async function interactive() {
           clearScreen(); printCompactHeader('discussions'); cmdDiscussions(rest); break;
         case 'summary':
           clearScreen(); printCompactHeader('summary'); cmdSummary(rest); break;
-        case 'stats':
-          clearScreen(); printCompactHeader('stats'); cmdStats(); break;
         case 'install':
           clearScreen(); printCompactHeader('install'); await cmdInstall(rest); break;
         case 'online':
@@ -1166,8 +1359,6 @@ async function checkForUpdate() {
       cmdDiscussions(rest); break;
     case 'summary':
       cmdSummary(rest); break;
-    case 'stats':
-      cmdStats(); break;
     case 'install':
       await cmdInstall(rest);
       process.exit(0);

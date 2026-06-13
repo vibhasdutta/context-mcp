@@ -3,11 +3,12 @@
 codegraph/server.py — MCP server exposing codebase knowledge graph tools.
 
 Tools:
-  codegraph_build   — scan project, extract AST nodes, build graph (local only, no API)
-  codegraph_query   — structural question OR single-node lookup (or both)
-  codegraph_arch    — module map: every file with its exports and imports
-  codegraph_report  — return full CODEGRAPH_REPORT.md
-  codegraph_nodes   — list nodes of a given type
+  codegraph_build    — scan project, extract AST nodes, build graph (local only, no API)
+  codegraph_query    — structural question OR single-node lookup (or both)
+  codegraph_arch     — module map: every file with its exports and imports
+  codegraph_report   — return full CODEGRAPH_REPORT.md
+  codegraph_nodes    — list nodes of a given type
+  codegraph_affected — BFS: what breaks if I change node X?
 """
 
 import asyncio
@@ -28,6 +29,10 @@ from .graph.builder import build, to_json_dict, save_graph, load_graph
 from .graph.query import answer as graph_answer, module_map
 from .graph.clustering import detect_communities
 from .report import generate as generate_report
+from .affected import run_affected
+from .export import to_html as export_html, to_graphml, to_obsidian, generate_all as export_all
+from .tree_html import to_html as tree_html
+from .callflow_html import to_html as callflow_html
 
 app = Server("codegraph")
 
@@ -95,6 +100,40 @@ TOOLS = [
         },
     ),
     Tool(
+        name="codegraph_html",
+        description=(
+            "Generate interactive vis.js HTML graph visualization. "
+            "Dark theme, search box, community toggle, click-to-inspect node panel. "
+            "Outputs codegraph-cache/graph.html. Also generates graph.graphml and obsidian/ vault."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path":    {"type": "string", "description": "Project root"},
+                "formats": {"type": "array", "items": {"type": "string"}, "description": "Formats to generate: html, graphml, obsidian, tree, callflow (default: all)"},
+            },
+            "required": ["path"],
+        },
+    ),
+    Tool(
+        name="codegraph_affected",
+        description=(
+            "BFS traversal: given a node name, find every node that would be affected "
+            "if you change it — callers, importers, inheritors, etc. "
+            "Use before refactoring to understand blast radius. "
+            "Returns affected nodes with file paths, relation types, and traversal depth."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path":  {"type": "string", "description": "Project root"},
+                "node":  {"type": "string", "description": "Node name, ID, or file path to start from"},
+                "depth": {"type": "integer", "description": "BFS depth (default 2, max 5)"},
+            },
+            "required": ["path", "node"],
+        },
+    ),
+    Tool(
         name="codegraph_arch",
         description=(
             "Return a module map: every file with its exported functions/classes and what it imports. "
@@ -128,11 +167,13 @@ async def call_tool(name: str, arguments: dict):
 
 
 async def _dispatch(name: str, args: dict):
-    if name == "codegraph_build":  return await _build(args)
-    if name == "codegraph_query":  return await _query(args)
-    if name == "codegraph_report": return await _report(args)
-    if name == "codegraph_nodes":  return await _nodes(args)
-    if name == "codegraph_arch":   return await _arch(args)
+    if name == "codegraph_build":    return await _build(args)
+    if name == "codegraph_query":    return await _query(args)
+    if name == "codegraph_report":   return await _report(args)
+    if name == "codegraph_nodes":    return await _nodes(args)
+    if name == "codegraph_arch":     return await _arch(args)
+    if name == "codegraph_affected": return await _affected(args)
+    if name == "codegraph_html":     return await _export_viz(args)
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -190,6 +231,10 @@ async def _build(args: dict) -> dict:
     save_graph(root, graph_dict)
     generate_report(graph_dict, root)
     save_cache(root, cache)
+    try:
+        export_all(graph_dict, root)
+    except Exception:
+        pass
 
     elapsed_ms = int((time.time() - t0) * 1000)
     result = {
@@ -293,6 +338,50 @@ async def _arch(args: dict) -> dict:
         raise ValueError("No graph found. Run codegraph_build first.")
     limit = args.get("limit", 100)
     return module_map(graph_dict, limit=limit)
+
+
+async def _affected(args: dict) -> dict:
+    graph_dict = load_graph(args["path"])
+    if not graph_dict:
+        raise ValueError("No graph found. Run codegraph_build first.")
+    depth = min(int(args.get("depth", 2)), 5)
+    return run_affected(graph_dict, args["node"], depth=depth)
+
+
+async def _export_viz(args: dict) -> dict:
+    graph_dict = load_graph(args["path"])
+    if not graph_dict:
+        raise ValueError("No graph found. Run codegraph_build first.")
+    cache_dir = str(Path(args["path"]) / "codegraph-cache")
+    formats = args.get("formats") or ["html", "graphml", "obsidian", "tree", "callflow"]
+    results: dict[str, str] = {}
+    if "html" in formats:
+        try:
+            results["html"] = export_html(graph_dict, str(Path(cache_dir) / "graph.html"))
+        except Exception as e:
+            results["html_error"] = str(e)
+    if "graphml" in formats:
+        try:
+            results["graphml"] = to_graphml(graph_dict, str(Path(cache_dir) / "graph.graphml"))
+        except Exception as e:
+            results["graphml_error"] = str(e)
+    if "obsidian" in formats:
+        try:
+            results["obsidian"] = to_obsidian(graph_dict, str(Path(cache_dir) / "obsidian"))
+        except Exception as e:
+            results["obsidian_error"] = str(e)
+    if "tree" in formats:
+        try:
+            results["tree"] = tree_html(graph_dict, str(Path(cache_dir) / "tree.html"))
+        except Exception as e:
+            results["tree_error"] = str(e)
+    if "callflow" in formats:
+        try:
+            results["callflow"] = callflow_html(graph_dict, str(Path(cache_dir) / "callflow.html"))
+        except Exception as e:
+            results["callflow_error"] = str(e)
+    results["summary"] = f"Generated: {', '.join(k for k in results if not k.endswith('_error'))}"
+    return results
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
