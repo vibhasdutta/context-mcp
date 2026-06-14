@@ -595,6 +595,14 @@ const PLATFORMS = {
       }
       // Slash commands — user-global
       _writeCommands(homedir());
+      // Rules file — project root for project scope, ~/.claude/CLAUDE.md for global
+      const claudeMd = _tpl('claude/CLAUDE.md');
+      if (claudeMd) {
+        const claudeMdPath = scope === 'project'
+          ? join(dir, 'CLAUDE.md')
+          : join(homedir(), '.claude', 'CLAUDE.md');
+        _writeFile(claudeMdPath, claudeMd, scope === 'project' ? 'CLAUDE.md' : '~/.claude/CLAUDE.md');
+      }
       // Hooks — write into the appropriate settings.json scope
       // Project hooks live in .claude/hooks/ and are committed; user hooks in ~/.claude/hooks/
       const hooksBase = scope === 'project' ? dir : homedir();
@@ -734,16 +742,21 @@ const PLATFORMS = {
         JSON.stringify(settings, null, 2),
         scope === 'project' ? '.gemini/settings.json' : '~/.gemini/settings.json',
       );
-      // Slash commands (.toml) — project-scoped only
-      if (scope === 'project') {
-        const cmdsSrc = join(TPLS, 'gemini', 'commands');
-        const cmdsDest = join(dir, '.gemini', 'commands');
-        for (const file of ['context-resume.toml', 'graph-build.toml', 'save-context.toml']) {
-          const src = join(cmdsSrc, file);
-          if (existsSync(src)) _writeFile(join(cmdsDest, file), readFileSync(src, 'utf8'), `.gemini/commands/${file}`);
-        }
-        const md = _tpl('gemini/GEMINI.md');
-        if (md) _writeFile(join(dir, 'GEMINI.md'), md, 'GEMINI.md');
+      // Slash commands (.toml) — project: .gemini/commands/, global: ~/.gemini/commands/
+      const geminiCmdsDest = join(hooksBase, '.gemini', 'commands');
+      const cmdsSrc = join(TPLS, 'gemini', 'commands');
+      for (const file of ['context-resume.toml', 'graph-build.toml', 'save-context.toml']) {
+        const src = join(cmdsSrc, file);
+        const label = scope === 'project' ? `.gemini/commands/${file}` : `~/.gemini/commands/${file}`;
+        if (existsSync(src)) _writeFile(join(geminiCmdsDest, file), readFileSync(src, 'utf8'), label);
+      }
+      // Rules file — project root for project scope, ~/.gemini/GEMINI.md for global
+      const geminiMd = _tpl('gemini/GEMINI.md');
+      if (geminiMd) {
+        const geminiMdPath = scope === 'project'
+          ? join(dir, 'GEMINI.md')
+          : join(homedir(), '.gemini', 'GEMINI.md');
+        _writeFile(geminiMdPath, geminiMd, scope === 'project' ? 'GEMINI.md' : '~/.gemini/GEMINI.md');
       }
     },
   },
@@ -754,9 +767,13 @@ const PLATFORMS = {
       const includeHooks = scope === 'project';
       if (includeHooks) _copyCodexHooks(dir);
       _writeFile(join(dir, '.codex', 'config.toml'), _codexConfigToml(dir, includeHooks), '.codex/config.toml');
-      if (scope === 'project') {
-        const md = _tpl('codex/AGENTS.md');
-        if (md) _writeFile(join(dir, 'AGENTS.md'), md, 'AGENTS.md');
+      // Rules file — project root for project scope, ~/.codex/AGENTS.md for global
+      const codexMd = _tpl('codex/AGENTS.md');
+      if (codexMd) {
+        const codexMdPath = scope === 'project'
+          ? join(dir, 'AGENTS.md')
+          : join(homedir(), '.codex', 'AGENTS.md');
+        _writeFile(codexMdPath, codexMd, scope === 'project' ? 'AGENTS.md' : '~/.codex/AGENTS.md');
       }
       // Prompts (slash commands) — always user-global; Codex only loads ~/.codex/prompts/
       const promptsSrc = join(TPLS, 'codex', 'prompts');
@@ -834,9 +851,14 @@ const PLATFORMS = {
           const src = join(wfSrc, file);
           if (existsSync(src)) _writeFile(join(dir, '.agents', 'workflows', file), readFileSync(src, 'utf8'), `.agents/workflows/${file}`);
         }
-        // Rules file — Antigravity reads GEMINI.md at project root
-        const md = _tpl('antigravity/GEMINI.md');
-        if (md) _writeFile(join(dir, 'GEMINI.md'), md, 'GEMINI.md');
+      }
+      // Rules file — project root for project scope, ~/.config/antigravity/GEMINI.md for global
+      const agMd = _tpl('antigravity/GEMINI.md');
+      if (agMd) {
+        const agMdPath = scope === 'project'
+          ? join(dir, 'GEMINI.md')
+          : join(homedir(), '.config', 'antigravity', 'GEMINI.md');
+        _writeFile(agMdPath, agMd, scope === 'project' ? 'GEMINI.md' : '~/.config/antigravity/GEMINI.md');
       }
     },
   },
