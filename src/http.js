@@ -622,7 +622,7 @@ async function handleRequest(req, res) {
               <div class="step">
                 <span class="step-num">2</span>
                 <span class="step-title">Server URL</span>
-                <span class="step-content">Enter: <code>${req.headers['x-forwarded-proto'] || req.socket?.encrypted ? 'https' : 'http'}://${req.headers.host}</code></span>
+                <span class="step-content">Enter: <code>${req.headers['x-forwarded-proto'] === 'https' || req.socket?.encrypted ? 'https' : 'http'}://${req.headers.host}</code></span>
               </div>
 
               <div class="step">

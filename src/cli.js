@@ -5,7 +5,7 @@
  */
 
 import readline from 'node:readline';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -414,7 +414,6 @@ const _GLOBAL_GITIGNORE_ENTRIES = [
   '.gemini/',
   '.codex/',
   '.windsurf/',
-  '.agents/',
   // Build outputs and session artifacts
   'codegraph-cache/',
   '.mcp.json',
@@ -429,7 +428,6 @@ function _graphForProject(graphs, projectName) {
 
 const _PROJECT_GITIGNORE_ENTRIES = [
   '.claude/', '.cursor/', '.vscode/', '.gemini/', '.codex/',
-  '.agents/',
   'codegraph-cache/', '.mcp.json', 'CLAUDE.md', 'GEMINI.md', 'AGENTS.md',
 ];
 
@@ -498,7 +496,12 @@ function _copyHooks(platform, dotDir, dir, hookFiles) {
   for (const file of hookFiles) {
     const src = join(hooksSrc, file);
     if (existsSync(src)) {
-      _writeFile(join(hooksDest, file), readFileSync(src, 'utf8'), `${dotDir}/hooks/${file}`);
+      const dest = join(hooksDest, file);
+      _writeFile(dest, readFileSync(src, 'utf8'), `${dotDir}/hooks/${file}`);
+      // Make executable on Unix so shells can run it without explicit `node` prefix
+      if (process.platform !== 'win32') {
+        try { chmodSync(dest, 0o755); } catch {}
+      }
     }
   }
 }
@@ -618,11 +621,11 @@ const PLATFORMS = {
       _mergeHooksIntoSettings(settingsPath, {
         PreToolUse: [{
           matcher: 'Bash',
-          hooks: [{ type: 'command', command: preHook, timeout: 30, statusMessage: 'Checking shell command' }],
+          hooks: [{ type: 'command', command: `node "${preHook}"`, timeout: 30, statusMessage: 'Checking shell command' }],
         }],
         PostToolUse: [{
           matcher: 'Bash',
-          hooks: [{ type: 'command', command: postHook, timeout: 30, statusMessage: 'Saving failed shell context' }],
+          hooks: [{ type: 'command', command: `node "${postHook}"`, timeout: 30, statusMessage: 'Saving failed shell context' }],
         }],
       }, scope === 'project' ? '.claude/settings.json' : '~/.claude/settings.json');
       // Register MCP server via claude CLI
@@ -732,11 +735,11 @@ const PLATFORMS = {
       );
       settings.hooks.BeforeTool = stripOld(settings.hooks.BeforeTool).concat([{
         matcher: 'run_shell_command',
-        hooks: [{ type: 'command', command: `node ${beforeHook}`, timeout: 30 }],
+        hooks: [{ type: 'command', command: `node "${beforeHook}"`, timeout: 30 }],
       }]);
       settings.hooks.AfterTool = stripOld(settings.hooks.AfterTool).concat([{
         matcher: 'run_shell_command',
-        hooks: [{ type: 'command', command: `node ${afterHook}`, timeout: 30 }],
+        hooks: [{ type: 'command', command: `node "${afterHook}"`, timeout: 30 }],
       }]);
       _writeFile(settingsPath,
         JSON.stringify(settings, null, 2),
@@ -829,39 +832,6 @@ const PLATFORMS = {
       }
     },
   },
-  antigravity: {
-    label: 'Antigravity IDE',
-    restartNote: 'Restart your Antigravity session to pick up hooks and rules.',
-    install(dir, scope) {
-      // Antigravity uses stdio-incompatible MCP transport — integrate via ctx CLI + GEMINI.md instead.
-      if (scope === 'project') {
-        // Post-tool hook — saves failed tool calls to context-mcp via ctx CLI
-        _copyHooks('antigravity', '.agents', dir, ['context-mcp-post-tool-use.js']);
-        const hookPath = join(dir, '.agents', 'hooks', 'context-mcp-post-tool-use.js');
-        _mergeJsonFile(join(dir, '.agents', 'hooks.json'), '.agents/hooks.json', obj => {
-          const strip = arr => (arr || []).filter(h => !String(h.command || '').includes('context-mcp-'));
-          obj.hooks = strip(obj.hooks).concat([{
-            event: 'PostToolUse',
-            command: `node "${hookPath}"`,
-          }]);
-        });
-        // Workflows (slash commands) — .agents/workflows/
-        const wfSrc = join(TPLS, 'antigravity', 'workflows');
-        for (const file of ['context-resume.md', 'graph-build.md', 'save-context.md']) {
-          const src = join(wfSrc, file);
-          if (existsSync(src)) _writeFile(join(dir, '.agents', 'workflows', file), readFileSync(src, 'utf8'), `.agents/workflows/${file}`);
-        }
-      }
-      // Rules file — project root for project scope, ~/.config/antigravity/GEMINI.md for global
-      const agMd = _tpl('antigravity/GEMINI.md');
-      if (agMd) {
-        const agMdPath = scope === 'project'
-          ? join(dir, 'GEMINI.md')
-          : join(homedir(), '.config', 'antigravity', 'GEMINI.md');
-        _writeFile(agMdPath, agMd, scope === 'project' ? 'GEMINI.md' : '~/.config/antigravity/GEMINI.md');
-      }
-    },
-  },
 };
 
 async function cmdInstall(args) {
@@ -923,7 +893,7 @@ async function cmdInstall(args) {
 
   if (!keys.length) {
     printSection('Install');
-    console.log(`  ${muted('Usage:')}  ctx install ${faint('[--initial] [--claude] [--cursor] [--vscode] [--gemini] [--codex] [--windsurf] [--antigravity] [--all]')}`);
+    console.log(`  ${muted('Usage:')}  ctx install ${faint('[--initial] [--claude] [--cursor] [--vscode] [--gemini] [--codex] [--windsurf] [--all]')}`);
     console.log('');
     console.log(`  ${accent('--initial      ')}  ${faint('Install / update Node.js + Python (codegraph) deps')}`);
     console.log('');

@@ -530,8 +530,10 @@ def _extract_with_regex(source: str, rel_path: str, ext: str) -> list[dict]:
                         "imports": import_names[:],
                     })
 
+    # brace-scope tracking only works for brace-delimited languages
+    _BRACE_LANGS = {"javascript", "typescript", "go", "rust", "java", "c", "cpp", "csharp", "php", "swift"}
     func_nodes = [n for n in nodes if n["type"] == "function"]
-    if func_nodes:
+    if func_nodes and lang in _BRACE_LANGS:
         _attach_calls_brace(lines, func_nodes)
 
     return nodes

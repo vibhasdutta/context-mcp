@@ -210,7 +210,7 @@ def to_html(graph_dict: dict, output_path: str) -> str:
 <p>{len(nodes)} nodes · {len(edges)} edges · {len(communities)} communities · generated {escape(generated)}</p>
 {god_html}
 <div class="mermaid">
-{escape(overview_mermaid)}
+{overview_mermaid}
 </div>
 </section>"""
 
@@ -239,7 +239,7 @@ def to_html(graph_dict: dict, output_path: str) -> str:
   <div class="card"><h3>Key Files</h3><ul>{files_html}</ul></div>
 </div>
 <div class="mermaid">
-{escape(diagram)}
+{diagram}
 </div>
 {"<h3>Incoming Cross-Community Calls</h3>" + table if table else ""}
 <hr>

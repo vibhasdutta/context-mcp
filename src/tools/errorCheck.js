@@ -35,7 +35,7 @@ export async function handle(args, state) {
 
   if (action === 'check') {
     const results = unifiedSearch({ mode: 'semantic', query: errorMessage, project, limit: 5 })
-      .filter(r => r.type === 'bug');
+      .filter(r => Array.isArray(r.tags) && r.tags.includes('error-log'));
     if (results.length > 0 && results[0].similarity > 0.4) {
       return {
         success: true, found: true,
@@ -53,8 +53,8 @@ export async function handle(args, state) {
       sessionId: state.sessionId || null,
       title:   `Error: ${errorMessage.split('\n')[0].slice(0, 60)}`,
       content: `Command: ${command || 'unknown'}\n\nError:\n${errorMessage}\n\nSolution:\n${solution}`,
-      type:    'bug',
-      status:  'done',
+      type:    'note',
+      status:  'active',
       tags:    ['error-log', command].filter(Boolean),
     });
     fireAutoLink(entry.id, state);

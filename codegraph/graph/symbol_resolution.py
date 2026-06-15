@@ -79,11 +79,14 @@ def resolve_calls(
                 continue
 
             target_ids: list[str] = []
+            via_import = False
 
             # 1. Try (imported_module_stem, callee_name) for import-guided resolution
             for stem in imported_stems:
                 candidates = module_index.get((stem, callee_name), [])
                 target_ids.extend(candidates)
+            if target_ids:
+                via_import = True
 
             # 2. Fall back to global unique name match
             if not target_ids:
@@ -101,7 +104,7 @@ def resolve_calls(
                 continue
 
             existing_edge_keys.add(key)
-            confidence = "EXTRACTED" if imported_stems else "INFERRED"
+            confidence = "EXTRACTED" if via_import else "INFERRED"
             new_edges.append({
                 "from":       caller_id,
                 "to":         target_id,

@@ -107,7 +107,7 @@ export async function handle(name, args, state) {
       saveAutoContext({
         title:   `wrote ${filePath.split(/[\\/]/).pop()}`,
         content: `write_file: created/overwrote ${filePath}`,
-        type:    'code',
+        type:    'note',
         files:   [{ path: filePath, action: 'modified' }],
         tags:    ['file-write'],
         state,
@@ -159,7 +159,7 @@ export async function handle(name, args, state) {
         title:   `patched ${filePath.split(/[\\/]/).pop()}${sorted.length > 1 ? ` (${sorted.length} edits)` : ''}`,
         content: `patch_file: ${sorted.length} edit(s) in ${filePath}\n` +
                  sorted.map(e => `  ${e.description}: -${e.old_str.split('\n').length} +${e.new_str.split('\n').length} lines`).join('\n'),
-        type:    'code',
+        type:    'note',
         files:   [{ path: filePath, action: 'modified' }],
         tags:    ['file-patch'],
         state,

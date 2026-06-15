@@ -178,6 +178,11 @@ function findEntryById(id, projectHint) {
     const e = search(data);
     if (e) return { entry: e, projectName: name };
   }
+  // Always check 'global' — it is never in the projects index
+  if (!_projectData.has('global') && 'global' !== projectHint) {
+    const e = search(loadProjectData('global'));
+    if (e) return { entry: e, projectName: 'global' };
+  }
   const idx = loadProjectsIndex();
   for (const proj of idx) {
     if (_projectData.has(proj.name) || proj.name === projectHint) continue;
@@ -384,10 +389,12 @@ export function getContext({ project, tags, limit = 20, compact = false, ids } =
 
   if (ids && ids.length) {
     const idSet = new Set(ids);
-    // Load all projects to find entries
+    // Load all projects to find entries — always include 'global' since it is
+    // never registered in the projects index (ensureProject skips it)
     const idx = loadProjectsIndex();
     const all = [];
     const loaded = new Set(_projectData.keys());
+    loaded.add('global'); // ensure global is always searched
     for (const proj of idx) loaded.add(proj.name);
     for (const name of loaded) {
       for (const e of getAllEntries(name)) {
@@ -403,10 +410,11 @@ export function getContext({ project, tags, limit = 20, compact = false, ids } =
     const globalEntries = project !== 'global' ? getAllEntries('global') : [];
     results = [...entries, ...globalEntries];
   } else {
-    // No project filter: load all
+    // No project filter: load all — always include 'global' since it is never in the index
     const idx = loadProjectsIndex();
     const all = [];
     const seen = new Set(_projectData.keys());
+    seen.add('global');
     for (const proj of idx) seen.add(proj.name);
     for (const name of seen) {
       all.push(...getAllEntries(name));
@@ -434,7 +442,7 @@ export function getContextSince(since, project) {
   } else {
     const idx = loadProjectsIndex();
     results = [];
-    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
     for (const name of seen) results.push(...getAllEntries(name));
   }
   return results.filter(c => c.createdAt >= since);
@@ -450,7 +458,7 @@ export function searchContext({ query, project, limit = 10, compact = false }) {
   } else {
     const idx = loadProjectsIndex();
     results = [];
-    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
     for (const name of seen) results.push(...getAllEntries(name));
   }
   const scored = results.map(c => {
@@ -467,8 +475,9 @@ export function deleteContext({ id, ids }) {
   const idSet = new Set(ids && ids.length ? ids : (id ? [id] : []));
   if (!idSet.size) return { deleted: 0 };
   let deleted = 0;
-  // Scan all loaded projects
+  // Scan all loaded projects — always include 'global' since it is never in the index
   const seen = new Set(_projectData.keys());
+  seen.add('global');
   loadProjectsIndex().forEach(p => seen.add(p.name));
   for (const name of seen) {
     const data = loadProjectData(name);
@@ -524,7 +533,7 @@ export function countContext(project) {
   if (!project) {
     const idx = loadProjectsIndex();
     let total = 0;
-    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
     for (const name of seen) total += getAllEntries(name).length;
     return total;
   }
@@ -658,7 +667,7 @@ export function updateDiscussion({ id, name, title, description, content, status
   let disc = null;
   let projName = null;
   const idx = loadProjectsIndex();
-  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
   for (const pName of seen) {
     const d = loadProjectData(pName);
     const found = id ? d.discussions.find(x => x.id === id) : d.discussions.find(x => x.name === name);
@@ -690,9 +699,9 @@ export function getDiscussion({ project, name, id } = {}) {
     if (name) return list.find(d => d.name === name) || null;
     return null;
   }
-  // Search all
+  // Search all — always include 'global' since it is never in the projects index
   const idx = loadProjectsIndex();
-  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
   for (const pName of seen) {
     const d = loadProjectData(pName);
     const found = id ? d.discussions.find(x => x.id === id) : d.discussions.find(x => x.name === name);
@@ -709,7 +718,7 @@ export function listDiscussions({ project, status, type } = {}) {
     if (project !== 'global') list = [...list, ...loadProjectData('global').discussions];
   } else {
     const idx = loadProjectsIndex();
-    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
     for (const pName of seen) list.push(...loadProjectData(pName).discussions);
   }
   if (status) list = list.filter(d => d.status === status);
@@ -730,7 +739,7 @@ export function linkContextToDiscussion({ discussionId, discussionName, contextI
   let disc = null;
   let discProject = null;
   const idx = loadProjectsIndex();
-  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
   for (const pName of seen) {
     const d = loadProjectData(pName);
     const found = discussionId
@@ -764,7 +773,7 @@ export function linkContextToDiscussion({ discussionId, discussionName, contextI
 export function deleteDiscussion({ name, id }) {
   init();
   const idx = loadProjectsIndex();
-  const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+  const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
   for (const pName of seen) {
     const data = loadProjectData(pName);
     const before = data.discussions.length;
@@ -803,7 +812,7 @@ export function archiveExpired(project) {
     processEntries(getAllEntries(project), project);
   } else {
     const idx = loadProjectsIndex();
-    const seen = new Set([..._projectData.keys(), ...idx.map(p => p.name)]);
+    const seen = new Set([..._projectData.keys(), 'global', ...idx.map(p => p.name)]);
     for (const name of seen) processEntries(getAllEntries(name).slice(), name);
   }
   if (count > 0) markDirty();

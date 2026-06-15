@@ -19,7 +19,7 @@ def walk_files(root: str, extra_ignore: set | None = None) -> Iterator[str]:
     ignore = DEFAULT_IGNORE | (extra_ignore or set())
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune ignored dirs in-place so os.walk doesn't descend
-        dirnames[:] = [d for d in dirnames if d not in ignore and not d.startswith(".")]
+        dirnames[:] = [d for d in dirnames if not _should_ignore(d, ignore)]
         for fname in filenames:
             ext = Path(fname).suffix.lower()
             if fname in SKIP_FILENAMES or ext in SKIP_EXTENSIONS:

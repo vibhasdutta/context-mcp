@@ -5,6 +5,7 @@ No LLM call on query — pure graph + keyword matching.
 """
 
 import re
+from collections import deque
 from typing import Any
 
 
@@ -114,10 +115,10 @@ def _find_by_name(nodes: list, name: str) -> dict | None:
 
 
 def _detect_intent(q: str) -> str:
-    if any(w in q for w in ("depend", "import", "use", "require")):
-        return "depends_on"
     if any(w in q for w in ("used by", "who calls", "caller")):
         return "used_by"
+    if any(w in q for w in ("depend", "import", "use", "require")):
+        return "depends_on"
     if any(w in q for w in ("path", "connect", "relate", "between")):
         return "path"
     if any(w in q for w in ("list", "all", "show all", "every")):
@@ -164,9 +165,9 @@ def _shortest_path(from_node: dict, to_node: dict, edges: list, nodes: list) -> 
 
     start, end = from_node["id"], to_node["id"]
     visited = {start: None}
-    queue = [start]
+    queue: deque[str] = deque([start])
     while queue:
-        cur = queue.pop(0)
+        cur = queue.popleft()
         if cur == end:
             break
         for nb in adj.get(cur, []):

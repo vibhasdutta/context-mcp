@@ -64,8 +64,9 @@ def _partition(G: nx.Graph, resolution: float = 1.0) -> dict[str, int]:
     except ImportError:
         pass
 
-    kwargs = {"seed": 42, "threshold": 1e-4, "resolution": resolution}
-    if "max_level" in inspect.signature(nx.community.louvain_communities).parameters:
+    louvain_sig = inspect.signature(nx.community.louvain_communities).parameters
+    kwargs = {"seed": 42, "resolution": resolution}
+    if "max_level" in louvain_sig:
         kwargs["max_level"] = 10
     communities = nx.community.louvain_communities(stable, **kwargs)
     return {node: cid for cid, nodes in enumerate(communities) for node in nodes}
@@ -102,7 +103,8 @@ def cluster(
     if exclude_hubs_percentile is not None:
         degrees = sorted(d for _, d in G.degree())
         if degrees:
-            idx = max(0, int(len(degrees) * exclude_hubs_percentile / 100) - 1)
+            # idx is the last position we keep; nodes beyond this are hubs
+            idx = min(len(degrees) - 1, int(len(degrees) * exclude_hubs_percentile / 100))
             threshold = degrees[idx]
             hub_nodes = {n for n, d in G.degree() if d > threshold}
 

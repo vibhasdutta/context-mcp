@@ -22,7 +22,7 @@ def _build_report(g: dict) -> str:
     god_nodes  = g.get("god_nodes", [])
     generated  = g.get("generated_at", "")
 
-    node_map = {n["id"]: n for n in nodes}
+    node_map = {n["id"]: n for n in nodes if "id" in n}
 
     lines = [
         "# CodeGraph Report",

@@ -416,7 +416,7 @@ def to_obsidian(graph_dict: dict, output_dir: str) -> str:
         fpath = n.get("file", "")
         ntype = n.get("type", "")
         comm  = node_community.get(nid)
-        comm_tag = _obsidian_tag(comm["label"]) if comm else "misc"
+        comm_tag = _obsidian_tag(comm.get("label", f"community_{comm['id']}")) if comm else "misc"
 
         lines = [
             "---",

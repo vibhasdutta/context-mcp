@@ -192,13 +192,30 @@ async def _build(args: dict) -> dict:
 
     all_nodes: list[dict] = []
 
-    for nodes in cached.values():
-        all_nodes.extend(nodes)
+    for rel_path, nodes in cached.items():
+        if nodes:
+            all_nodes.extend(nodes)
+        else:
+            # Previously cached as empty — still add a file-level node so it's visible
+            all_nodes.append({
+                "id":   f"{rel_path}::file::{Path(rel_path).name}",
+                "name": Path(rel_path).name,
+                "type": "file",
+                "file": rel_path,
+            })
 
     for rel_path, abs_path in changed.items():
         cat = classify_file(abs_path)
         if cat in ("code", "sql"):
             nodes = ast_extract(abs_path, rel_path)
+            if not nodes:
+                # Extractor found no symbols — still represent the file so it appears in the graph
+                nodes = [{
+                    "id":   f"{rel_path}::file::{Path(rel_path).name}",
+                    "name": Path(rel_path).name,
+                    "type": "file",
+                    "file": rel_path,
+                }]
             set_cached_nodes(cache, rel_path, file_hash(abs_path), nodes)
             all_nodes.extend(nodes)
         elif cat == "config":
@@ -232,7 +249,7 @@ async def _build(args: dict) -> dict:
     generate_report(graph_dict, root)
     save_cache(root, cache)
     try:
-        export_all(graph_dict, root)
+        export_all(graph_dict, str(Path(root) / "codegraph-cache"))
     except Exception:
         pass
 

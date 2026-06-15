@@ -175,7 +175,7 @@ export async function handle(name, args, state) {
       saveAutoContext({
         title:   `git commit: ${args.message.slice(0, 57)}${args.message.length > 57 ? '...' : ''}`,
         content: `hash: ${hash} | branch: ${branch}\nmessage: ${args.message}\nfiles: ${stagedFiles.map(f => f.path).join(', ')}`,
-        type:    'decision',
+        type:    'note',
         files:   stagedFiles,
         tags:    ['git', 'commit', branch],
         state,

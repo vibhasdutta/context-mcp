@@ -11,7 +11,7 @@
 
 Persistent memory and codebase knowledge graph for AI coding assistants — delivered as a single MCP server.
 
-One shared context store across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Antigravity IDE, Claude.ai, and ChatGPT. Save context from one AI, pick it up in another.
+One shared context store across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Claude.ai, and ChatGPT. Save context from one AI, pick it up in another.
 
 ---
 
@@ -77,8 +77,7 @@ ctx install --cursor      # Cursor
 ctx install --vscode      # VS Code Copilot
 ctx install --gemini      # Gemini CLI
 ctx install --codex       # Codex CLI
-ctx install --windsurf      # Windsurf
-ctx install --antigravity   # Antigravity IDE
+ctx install --windsurf    # Windsurf
 ```
 
 For Codex project installs, `ctx install --codex` writes:

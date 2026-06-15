@@ -25,44 +25,48 @@ def build(all_nodes: list[dict]) -> "nx.DiGraph | dict":
 
     G = nx.DiGraph()
 
-    node_by_name: dict[str, str] = {}    # name -> id
-    module_by_file: dict[str, str] = {}  # rel_path -> module node id
+    _name_to_ids: dict[str, list[str]] = {}  # name -> [ids] (may be multiple)
+    file_rep: dict[str, str] = {}            # rel_path -> representative node id (module > file > first)
+    file_imports: dict[str, list[str]] = {}  # rel_path -> aggregated import names
 
     for node in all_nodes:
         nid = node.get("id", "")
         if not nid:
             continue
         G.add_node(nid, **{k: v for k, v in node.items() if k not in ("imports", "calls", "relations")})
-        node_by_name[node.get("name", "")] = nid
-        if node.get("type") == "module":
-            module_by_file[node.get("file", "")] = nid
+        name = node.get("name", "")
+        if name:
+            _name_to_ids.setdefault(name, []).append(nid)
+        # Track a representative node per file (prefer module, then file, then first seen)
+        frel = node.get("file", "")
+        ntype = node.get("type", "")
+        if frel and (frel not in file_rep or ntype in ("module", "file")):
+            file_rep[frel] = nid
+        # Aggregate imports per file from any node type
+        for imp in node.get("imports", []):
+            lst = file_imports.setdefault(frel, [])
+            if imp not in lst:
+                lst.append(imp)
 
-    # Build file-path lookup from module nodes
+    # Unambiguous name→id map: only include names that resolve to exactly one node
+    node_by_name: dict[str, str] = {n: ids[0] for n, ids in _name_to_ids.items() if len(ids) == 1}
+
+    # Build file-path lookup from all file/module representative nodes
     file_node: dict[str, str] = {}
-    for rel_path, mod_id in module_by_file.items():
+    for rel_path, rep_id in file_rep.items():
         p = rel_path.replace("\\", "/")
         stem = p.split("/")[-1].split(".")[0]
         base = p.split("/")[-1]
         for key in (stem, base, p):
-            file_node.setdefault(key, mod_id)
+            file_node.setdefault(key, rep_id)
 
-    # defined-in edges: child nodes → their module
-    for node in all_nodes:
-        nid = node.get("id", "")
-        for rel in node.get("relations", []):
-            target_id = rel.get("id") or node_by_name.get(rel.get("name", ""))
-            if target_id and target_id != nid:
-                G.add_edge(nid, target_id,
-                           relation=rel.get("relation", "relates-to"),
-                           confidence=rel.get("confidence", "EXTRACTED"))
-
-    # Import edges: module → module
+    # Import edges: file → file (aggregated from all node types per file)
     seen_edges: set[tuple] = set()
-    for node in all_nodes:
-        if node.get("type") != "module":
+    for frel, imports in file_imports.items():
+        src_id = file_rep.get(frel)
+        if not src_id:
             continue
-        src_id = node.get("id", "")
-        for imp in node.get("imports", []):
+        for imp in imports:
             clean = imp.lstrip(".")
             parts = clean.replace("\\", "/").split("/")
             last  = parts[-1]
