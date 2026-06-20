@@ -90,8 +90,15 @@ codegraph_affected(path, node, depth?)   -> blast radius BFS — what breaks if 
 codegraph_html(path, formats?)           -> regenerate visualizations on demand
 ```
 
-Use `codegraph_arch` first. Read files only when you need exact bug or
-implementation details.
+Decision rules:
+- Unknown codebase: `codegraph_report` first (god nodes + surprises)
+- "Where is X?": `codegraph_query node:"X"`
+- Before any refactor: `codegraph_affected node:"X"` (blast radius)
+- List all classes: `codegraph_nodes type:"class"`
+- Just the function body: `get_symbol_detail name:"X"` (no full file read)
+- `search` finds past decisions. `codegraph_query` finds code symbols. Different tools.
+
+Read files only when you need exact bug or implementation details not in the graph.
 
 ---
 

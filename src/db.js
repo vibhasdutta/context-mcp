@@ -463,7 +463,10 @@ export function searchContext({ query, project, limit = 10, compact = false }) {
   }
   const scored = results.map(c => {
     const haystack = `${c.title || ''} ${c.content || ''} ${(Array.isArray(c.tags) ? c.tags : []).join(' ')}`.toLowerCase();
-    const score = terms.reduce((s, t) => s + (haystack.split(t).length - 1), 0);
+    const score = terms.reduce((s, t) => {
+      try { return s + (haystack.match(new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g'))?.length ?? 0); }
+      catch { return s; }
+    }, 0);
     return { ...c, score };
   }).filter(c => c.score > 0).sort((a, b) => b.score - a.score);
   const sliced = scored.slice(0, limit).map(({ score, ...c }) => c);

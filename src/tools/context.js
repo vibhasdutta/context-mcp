@@ -89,15 +89,15 @@ export async function handle(args, state) {
 
       const rawEntries    = getContext({ project: proj, limit: 15, compact: false })
         .filter(e => e.status !== 'archived');
-      // Newest 5 get full content; older entries get a lightweight preview
+      // Full content only for: newest 2, or high-signal entries (why+outcome+files)
+      // ponytail: avoids dumping 5 full auto-entries (graph builds, etc.) every resume
       const entries = rawEntries.map((e, i) => {
-        if (i < 5) return e;
+        const isHighSignal = e.why && e.outcome && Array.isArray(e.files) && e.files.length > 0;
+        if (i < 2 || isHighSignal) return e;
         return {
           id: e.id, project: e.project, title: e.title, type: e.type,
           status: e.status, tags: e.tags, source: e.source,
           createdAt: e.createdAt, updatedAt: e.updatedAt,
-          ...(e.why     ? { why: e.why }         : {}),
-          ...(e.outcome ? { outcome: e.outcome }  : {}),
           preview: (e.content || '').slice(0, 200),
         };
       });
@@ -116,12 +116,12 @@ export async function handle(args, state) {
 
       if (discussions.length === 1) state.discussionId = discussions[0].id;
 
-      const digest = totalEntries > 10
+      const digest = totalEntries > 25
         ? autoDigest(getContext({ project: proj, limit: 30 }), proj)
         : null;
 
       const graphStatus = graph
-        ? { built: true, path: graph.path, nodes: graph.nodes, edges: graph.edges, communities: graph.communities, builtAt: graph.builtAt }
+        ? { built: true, path: graph.path, nodes: graph.nodes, edges: graph.edges, builtAt: graph.builtAt }
         : { built: false };
 
       return {

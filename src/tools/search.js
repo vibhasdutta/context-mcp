@@ -44,7 +44,7 @@ export async function handle(args, _state) {
     id: e.id, project: e.project, title: e.title || '',
     tags: e.tags, createdAt: e.createdAt,
     similarity: e.similarity,
-    preview: (e.content || '').slice(0, 200),
+    // ponytail: preview omitted — call context.get id:[...] for full content
   }));
   return {
     matches, count: matches.length, mode,

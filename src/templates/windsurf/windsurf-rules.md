@@ -66,13 +66,24 @@ Call `search` before asking user to re-explain past work.
 ```
 codegraph_arch(path)                   → module map (files, exports, imports)
 codegraph_query(path, ...)             → find specific function/class/file
-codegraph_nodes(path, type)            → list all nodes of a type
-codegraph_report(path)                 → structural analysis
+codegraph_nodes(path, type)            → list all nodes of a type (class|function|module|file|struct|table)
+codegraph_report(path)                 → structural analysis, god nodes, clusters
 codegraph_affected(path, node, depth?) → blast radius — what breaks if X changes?
 codegraph_html(path, formats?)         → regenerate visualizations (auto on every build)
+get_symbol_detail(name, path)          → source code for one function/class — no full file read
+tool_registry()                        → which tools have side effects + approval requirements
+safety_policy()                        → which actions need user confirmation
 ```
 
-Use `codegraph_arch` first. Never read files for structure questions.
+Decision rules:
+- **Unknown codebase**: `codegraph_report` first
+- **"Where is X?"**: `codegraph_query node:"X"`
+- **Before any refactor**: `codegraph_affected node:"X"` — FIRST
+- **"Show me function X"**: `get_symbol_detail` — avoids full file read
+- **List all classes**: `codegraph_nodes type:"class"`
+- **`search`** finds past decisions. **`codegraph_query`** finds code. Different tools.
+
+Never read files for structure questions.
 
 ---
 

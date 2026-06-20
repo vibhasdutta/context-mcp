@@ -112,24 +112,27 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   <meta charset="UTF-8">
   <title>{title}</title>
   <style>
-    body {{ font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background: #f9f9f9; color: #333; }}
-    h1 {{ margin: 20px 0 0 24px; font-size: 2.2rem; font-weight: bold; color: #1e3a56; }}
-    .controls {{ margin: 20px 0 15px 24px; }}
-    button {{ margin-right: 10px; padding: 8px 18px; background: #007bff; color: #fff; border: none; border-radius: 5px; font-size: 0.95rem; cursor: pointer; }}
-    button:hover {{ background: #0056b3; }}
-    #tree-container {{ width: calc(100vw - 48px); height: 85vh; overflow: auto; border-radius: 8px; background: #fff; margin-left: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #ddd; }}
-    svg {{ background: #fff; border-radius: 8px; display: block; }}
-    .node circle {{ stroke-width: 2.5px; }}
-    .node text {{ font: 13px 'Segoe UI', sans-serif; paint-order: stroke fill; stroke: #fff; stroke-width: 3px; stroke-linejoin: round; stroke-opacity: 0.85; }}
-    .link {{ fill: none; stroke-opacity: 0.7; stroke-width: 2px; }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: #0f0f1a; color: #e0e0e0; }}
+    header {{ padding: 18px 28px 10px; border-bottom: 1px solid #2a2a4e; }}
+    h1 {{ font-size: 1.5rem; font-weight: 600; color: #e0e0e0; letter-spacing: -0.01em; }}
+    h1 span {{ color: #4E79A7; }}
+    .controls {{ padding: 12px 28px; display: flex; gap: 10px; border-bottom: 1px solid #2a2a4e; }}
+    button {{ padding: 6px 16px; background: #1a1a2e; color: #c0c0d0; border: 1px solid #3a3a5e; border-radius: 5px; font-size: 0.85rem; cursor: pointer; }}
+    button:hover {{ background: #2a2a4e; border-color: #4E79A7; color: #e0e0e0; }}
+    #tree-container {{ width: 100vw; height: calc(100vh - 100px); overflow: auto; }}
+    svg {{ background: #0f0f1a; display: block; }}
+    .node circle {{ stroke-width: 2px; }}
+    .node text {{ font: 12px 'Segoe UI', sans-serif; fill: #c8c8d8; paint-order: stroke fill; stroke: #0f0f1a; stroke-width: 3px; stroke-linejoin: round; stroke-opacity: 0.9; }}
+    .link {{ fill: none; stroke-opacity: 0.4; stroke-width: 1.5px; }}
   </style>
 </head>
 <body>
-  <h1>{header}</h1>
+  <header><h1><span>◈</span> {header}</h1></header>
   <div class="controls">
     <button onclick="expandAll()">Expand All</button>
     <button onclick="collapseAll()">Collapse All</button>
-    <button onclick="resetView()">Reset View</button>
+    <button onclick="resetView()">Reset</button>
   </div>
   <div id="tree-container">
     <svg id="tree-svg" width="{svg_width}" height="{svg_height}"></svg>
@@ -139,33 +142,28 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     const initialJsonData = {data_json};
     function transformData(d) {{
       function p(node, parentL1) {{
-        let dn = node.name;
-        if (node.total_count !== undefined && !/\(Total Count: \d+\)$/.test(dn))
-          dn += ` (Total Count: ${{node.total_count}})`;
-        const r = {{ name: dn, originalStageName: parentL1 === "Root" ? node.name : parentL1 }};
+        const r = {{ name: node.name, count: node.total_count || 0, originalStageName: parentL1 === "Root" ? node.name : parentL1 }};
         if (node.children && node.children.length > 0)
           r.children = node.children.map(c => p(c, parentL1 === "Root" ? node.name : parentL1));
         return r;
       }}
-      let rn = d.name;
-      if (d.total_count !== undefined && !/\(Total Count: \d+\)$/.test(rn)) rn += ` (Total Count: ${{d.total_count}})`;
-      return {{ name: rn, originalStageName: "Root", children: (d.children || []).map(c => p(c, "Root")) }};
+      return {{ name: d.name, count: d.total_count || 0, originalStageName: "Root", children: (d.children || []).map(c => p(c, "Root")) }};
     }}
     const treeData = transformData(initialJsonData);
     const PALETTE = [
-      ["#3498DB","#2980B9","#AED6F1"],["#2ECC71","#27AE60","#A9DFBF"],
-      ["#E74C3C","#C0392B","#F5B7B1"],["#9B59B6","#8E44AD","#D7BDE2"],
-      ["#F39C12","#D68910","#FAD7A0"],["#1ABC9C","#117864","#A2D9CE"],
-      ["#34495E","#1B2631","#ABB2B9"],["#E67E22","#BA4A00","#F5CBA7"],
+      ["#4E79A7","#3a5c84","#1e3050"],["#59A14F","#3d7a42","#1e4020"],
+      ["#E15759","#b03a3c","#6a1820"],["#B07AA1","#845a78","#4a2040"],
+      ["#F28E2B","#b8681c","#6a3808"],["#76B7B2","#4d8a85","#1e4040"],
+      ["#EDC948","#b89c20","#6a5808"],["#FF9DA7","#cc6370","#7a1828"],
     ];
-    const phaseColors = {{ "Root": {{ fill:"#4A4A4A",stroke:"#333333",collapsedFill:"#6C757D" }}, "Default": {{ fill:"#BDC3C7",stroke:"#95A5A6",collapsedFill:"#ECF0F1" }} }};
-    (initialJsonData.children||[]).forEach((c,i) => {{ const pal=PALETTE[i%PALETTE.length]; phaseColors[c.name]={{ fill:pal[0],stroke:pal[1],collapsedFill:pal[2] }}; }});
+    const phaseColors = {{ "Root": {{ fill:"#2a2a4e",stroke:"#4E79A7",collapsedFill:"#1a1a3e" }}, "Default": {{ fill:"#3a3a5e",stroke:"#5a5a8e",collapsedFill:"#2a2a4e" }} }};
+    (initialJsonData.children||[]).forEach((c,i) => {{ const pal=PALETTE[i%PALETTE.length]; phaseColors[c.name]={{ fill:pal[0],stroke:pal[0],collapsedFill:pal[2] }}; }});
     const levelPalettes = {{
-      0:{{fill:"#4A4A4A",stroke:"#333333",collapsedFill:"#6C757D"}},
-      2:{{fill:"#6ab04c",stroke:"#508a38",collapsedFill:"#a3d391"}},
-      3:{{fill:"#f0932b",stroke:"#d0730f",collapsedFill:"#f6c07e"}},
-      4:{{fill:"#be2edd",stroke:"#a01cb3",collapsedFill:"#e08bf2"}},
-      default:{{fill:"#747d8c",stroke:"#57606f",collapsedFill:"#a4b0be"}}
+      0:{{fill:"#1a1a3e",stroke:"#4E79A7",collapsedFill:"#0f0f2a"}},
+      2:{{fill:"#59A14F",stroke:"#3d7a42",collapsedFill:"#1e4020"}},
+      3:{{fill:"#F28E2B",stroke:"#b8681c",collapsedFill:"#6a3808"}},
+      4:{{fill:"#B07AA1",stroke:"#845a78",collapsedFill:"#4a2040"}},
+      default:{{fill:"#3a3a5e",stroke:"#5a5a8e",collapsedFill:"#2a2a4e"}}
     }};
     const svg = d3.select("#tree-svg");
     const margin = {{top:40,right:120,bottom:80,left:450}};

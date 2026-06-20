@@ -64,15 +64,20 @@ function buildIDF(docs) {
   return idf;
 }
 
+let _idfFingerprint = null;
+
 function getCachedIDF(corpus) {
   const gen = getGeneration();
-  // Cache hit: same generation (no mutations) and same corpus size
-  if (_idfCache && _idfGeneration === gen && _idfCorpusLen === corpus.length) {
+  // Fingerprint first 20 IDs to detect content change at same size (e.g. delete+add)
+  const fingerprint = corpus.slice(0, 20).map(e => e.id).join(',');
+  if (_idfCache && _idfGeneration === gen && _idfCorpusLen === corpus.length
+      && _idfFingerprint === fingerprint) {
     return _idfCache;
   }
   _idfCache = buildIDF(corpus);
   _idfGeneration = gen;
   _idfCorpusLen = corpus.length;
+  _idfFingerprint = fingerprint;
   return _idfCache;
 }
 

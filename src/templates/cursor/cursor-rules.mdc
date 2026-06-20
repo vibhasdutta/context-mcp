@@ -34,18 +34,27 @@ Build once: `codegraph_build(path)` — auto-generates visualizations, then quer
 ```
 codegraph_arch(path)                   → module map (files, exports, imports)
 codegraph_query(path, question?, node?) → find symbol or answer structural question
-codegraph_nodes(path, type)            → list all nodes of a type
+codegraph_nodes(path, type)            → list all nodes of a type (class|function|module|file|struct|table)
 codegraph_report(path)                 → god nodes, clusters, structural analysis
 codegraph_affected(path, node, depth?) → blast radius — what breaks if X changes?
 codegraph_html(path, formats?)         → regenerate visualizations on demand
+get_symbol_detail(name, path)          → source code for one function/class — no full file read
+tool_registry()                        → which tools have side effects + approval requirements
+safety_policy()                        → which actions need user confirmation before running
 ```
 
-Use `codegraph_arch` for structural questions. Read files for bugs/logic.
+Decision rules:
+- **Unknown codebase**: `codegraph_report` first (god nodes + surprises)
+- **"Where is X?"**: `codegraph_query node:"X"` — faster than grep
+- **Before any refactor**: `codegraph_affected node:"X"` — see blast radius FIRST
+- **"Show me function X"**: `get_symbol_detail` — no full file read needed
+- **List all classes**: `codegraph_nodes type:"class"`
+- **`search`** finds past decisions. **`codegraph_query`** finds code symbols. Different tools.
 
 ## Rules
 
 1. `context.resume` first — every conversation
 2. Always pass `project`
 3. `search` before asking the user about past work
-4. `codegraph_arch` before reading files
-5. Files only for bugs and logic
+4. Graph tools before reading files — `codegraph_affected` before any refactor
+5. Files only for bugs and exact logic

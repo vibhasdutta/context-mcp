@@ -9,17 +9,20 @@ import { getConfig } from './config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { version } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
 
-import * as contextTool    from './tools/context.js';
-import * as searchTool     from './tools/search.js';
-import * as planTool        from './tools/plan.js';
-import * as errorCheckTool from './tools/errorCheck.js';
-import * as fileTool       from './tools/fileTools.js';
-import * as gitTool        from './tools/gitTools.js';
-import * as codegraphTool  from './tools/codegraph.js';
+import * as contextTool      from './tools/context.js';
+import * as searchTool       from './tools/search.js';
+import * as planTool          from './tools/plan.js';
+import * as errorCheckTool   from './tools/errorCheck.js';
+import * as fileTool         from './tools/fileTools.js';
+import * as gitTool          from './tools/gitTools.js';
+import * as codegraphTool    from './tools/codegraph.js';
+import * as symbolDetailTool from './tools/symbolDetail.js';
+import * as toolRegistryTool from './tools/toolRegistry.js';
 
 const FILE_TOOL_NAMES      = new Set(fileTool.definitions.map(d => d.name));
 const GIT_TOOL_NAMES       = new Set(gitTool.definitions.map(d => d.name));
 const CODEGRAPH_TOOL_NAMES = codegraphTool.TOOL_NAMES;
+const REGISTRY_TOOL_NAMES  = toolRegistryTool.TOOL_NAMES;
 
 export function createServer({ enableFileTools = false, enableGitTools = getConfig().access_git === true } = {}) {
   const state = {
@@ -43,6 +46,8 @@ export function createServer({ enableFileTools = false, enableGitTools = getConf
     if (enableFileTools) tools.push(...fileTool.definitions);
     if (enableGitTools)  tools.push(...gitTool.definitions);
     tools.push(...codegraphTool.definitions);
+    tools.push(symbolDetailTool.definition);
+    tools.push(...toolRegistryTool.definitions);
     return { tools };
   });
 
@@ -73,6 +78,10 @@ export function createServer({ enableFileTools = false, enableGitTools = getConf
         result = await gitTool.handle(name, args, state);
       } else if (CODEGRAPH_TOOL_NAMES.has(name)) {
         result = codegraphTool.handle(name, args, state);
+      } else if (name === symbolDetailTool.definition.name) {
+        result = await symbolDetailTool.handle(args, state);
+      } else if (REGISTRY_TOOL_NAMES.has(name)) {
+        result = toolRegistryTool.handle(name);
       } else {
         throw new Error(`Unknown tool: ${name}`);
       }

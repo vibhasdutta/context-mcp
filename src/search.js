@@ -98,15 +98,10 @@ export function search({ query, mode = 'semantic', project, limit = 10, id, comp
       const all = getContext({ limit: 1000 });
       const target = all.find(e => e.id === id || e.id.startsWith(id));
       if (!target) throw new Error(`No entry found with id starting "${id}"`);
-      const explicitIds = new Set([
-        ...(target.relations  || []).map(r => r.id),
-        ...(target.relatedBy  || []).map(r => r.id),
-      ]);
-      const explicit = all.filter(e => explicitIds.has(e.id));
-      const semantic = explicitIds.size < limit
-        ? findRelated(target, all.filter(e => !explicitIds.has(e.id) && e.id !== target.id), limit - explicitIds.size)
-        : [];
-      return { target, results: [...explicit, ...semantic].slice(0, limit) };
+      // ponytail: relations/relatedBy never populated — pure semantic fallback
+      const others = all.filter(e => e.id !== target.id);
+      const results = findRelated(target, others, limit);
+      return { target, results };
     }
     default:
       throw new Error(`Unknown search mode: ${mode}. Use: keyword, semantic, related`);

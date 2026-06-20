@@ -128,6 +128,10 @@ def to_html(graph_dict: dict, output_path: str) -> str:
 <body>
 <div id="graph"></div>
 <div id="sidebar">
+  <div id="toolbar">
+    <button class="tb-btn" onclick="network.fit()">Fit</button>
+    <button class="tb-btn" onclick="network.setOptions({{physics:{{enabled:true}}}});setTimeout(()=>network.setOptions({{physics:{{enabled:false}}}}),2000)">Relayout</button>
+  </div>
   <div id="search-wrap">
     <input id="search" type="text" placeholder="Search nodes…" autocomplete="off">
     <div id="search-results"></div>
@@ -184,14 +188,20 @@ def _html_styles() -> str:
   .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
   .legend-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .legend-count { color: #666; font-size: 11px; }
-  #stats { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #555; }
+  #stats { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #888; }
+  #toolbar { padding: 6px 8px; border-bottom: 1px solid #2a2a4e; display: flex; gap: 6px; }
+  .tb-btn { background: #1a1a2e; border: 1px solid #3a3a5e; color: #c0c0d0; border-radius: 4px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+  .tb-btn:hover { background: #2a2a4e; border-color: #4E79A7; color: #e0e0e0; }
   #legend-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 4px 0; }
   #legend-controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: #aaa; user-select: none; }
   #legend-controls label:hover { color: #e0e0e0; }
-  #select-all-cb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border: 1.5px solid #3a3a5e; border-radius: 3px; background: #0f0f1a; cursor: pointer; }
+  #select-all-cb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border: 1.5px solid #3a3a5e; border-radius: 3px; background: #0f0f1a; cursor: pointer; position: relative; flex-shrink: 0; }
   #select-all-cb:checked { background: #4E79A7; border-color: #4E79A7; }
+  #select-all-cb:checked::after { content: "✓"; position: absolute; color: #fff; font-size: 10px; top: -2px; left: 1px; }
   .legend-cb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border: 1.5px solid #3a3a5e; border-radius: 3px; background: #0f0f1a; cursor: pointer; position: relative; flex-shrink: 0; }
   .legend-cb:checked { background: #4E79A7; border-color: #4E79A7; }
+  .legend-cb:checked::after { content: "✓"; position: absolute; color: #fff; font-size: 10px; top: -2px; left: 1px; }
+  .type-badge { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; background: #2a2a4e; color: #888; vertical-align: middle; }
 </style>"""
 
 
@@ -205,15 +215,21 @@ function esc(s) {{
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }}
 
+function makeTooltip(html) {{
+  const d = document.createElement('div');
+  d.style.cssText = 'background:#1a1a2e;border:1px solid #3a3a5e;border-radius:6px;padding:8px 12px;font-size:12px;color:#e0e0e0;max-width:260px;line-height:1.6;';
+  d.innerHTML = html;
+  return d;
+}}
 const nodesDS = new vis.DataSet(RAW_NODES.map(n => ({{
   id: n.id, label: n.label, color: n.color, size: n.size,
-  font: n.font, title: n.title,
+  font: n.font, title: makeTooltip(n.title),
   _community: n.community, _community_name: n.community_name,
   _source_file: n.source_file, _file_type: n.file_type, _degree: n.degree,
 }})));
 
 const edgesDS = new vis.DataSet(RAW_EDGES.map((e, i) => ({{
-  id: i, from: e.from, to: e.to, title: e.title,
+  id: i, from: e.from, to: e.to, title: e.title ? makeTooltip(esc(e.title)) : undefined,
   dashes: e.dashes, width: e.width, color: e.color,
   arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }},
 }})));
@@ -243,11 +259,10 @@ function showInfo(nodeId) {{
     return `<span class="neighbor-link" style="border-left-color:${{esc(color)}}" onclick="focusNode(${{JSON.stringify(nid)}})">${{esc(nb ? nb.label : nid)}}</span>`;
   }}).join('');
   document.getElementById('info-content').innerHTML = `
-    <div class="field"><b>${{esc(n.label)}}</b></div>
-    <div class="field">Type: ${{esc(n._file_type || 'unknown')}}</div>
-    <div class="field">Community: ${{esc(n._community_name || '-')}}</div>
-    <div class="field">Source: ${{esc(n._source_file || '-')}}</div>
-    <div class="field">Degree: ${{n._degree}}</div>
+    <div class="field"><b>${{esc(n.label)}}</b><span class="type-badge">${{esc(n._file_type || '?')}}</span></div>
+    <div class="field">Community: ${{esc(n._community_name || '—')}}</div>
+    <div class="field" title="${{esc(n._source_file || '')}}">File: ${{esc((n._source_file || '—').split('/').pop() || n._source_file || '—')}}</div>
+    <div class="field">Connections: ${{n._degree}}</div>
     ${{neighborIds.length ? `<div style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${{neighborIds.length}})</div><div id="neighbors-list">${{neighborItems}}</div>` : ''}}
   `;
 }}

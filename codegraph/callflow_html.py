@@ -52,8 +52,10 @@ hr{border:none;border-top:1px solid var(--border);margin:40px 0;}
 # ── Mermaid helpers ───────────────────────────────────────────────────────────
 
 def _mermaid_id(s: str) -> str:
-    """Sanitize string for use as a Mermaid node ID."""
-    return re.sub(r"[^a-zA-Z0-9_]", "_", s)[:40] or "node"
+    """Sanitize for Mermaid node ID; include hash suffix to prevent collisions."""
+    sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", s)[:32] or "node"
+    h = format(hash(s) & 0xFFFF, "04x")
+    return f"{sanitized}_{h}"
 
 
 def _mermaid_label(s: str) -> str:

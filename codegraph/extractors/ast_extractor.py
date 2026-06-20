@@ -326,14 +326,35 @@ def _extract_with_treesitter(source: bytes, rel_path: str, cfg: dict) -> list[di
     import_names: list[str] = []
     for node in _walk(root, cfg["import_types"]):
         text = node.text.decode("utf-8", errors="ignore").strip()
-        m = re.match(r'(?:import|from)\s+([\w./"\']+)', text)
+        raw = None
+        # Try 'from "module"' or "from 'module'" first (JS/TS/Python)
+        m = re.search(r'from\s+["\']([^"\']+)["\']', text)
         if m:
-            raw = m.group(1).strip("\"'").split(".")[0].split("/")[-1]
-            if raw and raw not in import_names:
-                import_names.append(raw)
-    if import_names:
-        for entry in nodes:
-            entry["imports"] = import_names[:]
+            raw = m.group(1)
+        if not raw:
+            # Plain: import module or import "module"
+            m = re.search(r'import\s+["\']?([a-zA-Z_][\w./\\-]*)["\']?', text)
+            if m:
+                raw = m.group(1)
+        if not raw:
+            # require("module")
+            m = re.search(r'require\s*\(\s*["\']([^"\']+)["\']\s*\)', text)
+            if m:
+                raw = m.group(1)
+        if raw:
+            stem = raw.strip("\"'").replace("\\", "/").split("/")[-1].split(".")[0]
+            if stem and stem not in import_names:
+                import_names.append(stem)
+    # For languages with empty import_types (Ruby, Lua), fall back to regex
+    if not import_names and not cfg.get("import_types"):
+        source_str = source_bytes.decode("utf-8", errors="ignore")
+        ext = Path(rel_path).suffix.lower()
+        lang_name = _EXT_TO_LANG_NAME.get(ext, "")
+        import_names = _collect_imports_regex(source_str, lang_name)
+
+    # Always assign (empty list is valid — don't gate on non-empty)
+    for entry in nodes:
+        entry["imports"] = import_names[:]
 
     return nodes
 
@@ -435,6 +456,12 @@ _IMPORT_RE: dict[str, re.Pattern] = {
     "rust": re.compile(r'use\s+([\w:]+)', re.MULTILINE),
     "java": re.compile(r'import\s+([\w.]+)', re.MULTILINE),
     "csharp": re.compile(r'using\s+([\w.]+)', re.MULTILINE),
+    "ruby": re.compile(r'require(?:_relative)?\s*["\']([^"\']+)["\']', re.MULTILINE),
+    "lua": re.compile(r'require\s*\(?["\']([^"\']+)["\']\)?', re.MULTILINE),
+    "c": re.compile(r'#include\s+[<"]([^>"]+)[>"]', re.MULTILINE),
+    "cpp": re.compile(r'#include\s+[<"]([^>"]+)[>"]', re.MULTILINE),
+    "dart": re.compile(r'import\s+["\']([^"\']+)["\']', re.MULTILINE),
+    "swift": re.compile(r'^import\s+([\w.]+)', re.MULTILINE),
 }
 
 # Keywords that look like calls but aren't

@@ -71,7 +71,10 @@ export const definitions = [
   },
   {
     name: 'codegraph_nodes',
-    description: 'List all nodes of a given type in the graph.',
+    description:
+      'List all nodes of a given type in the graph. ' +
+      'type must be one of: class, function, module, concept, service, file, struct, table. ' +
+      'Use to enumerate all classes before refactoring, all functions in a module, or all files of a type.',
     inputSchema: {
       type: 'object',
       properties: {

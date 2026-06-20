@@ -92,9 +92,17 @@ def resolve_calls(
             if not target_ids:
                 target_ids = name_index.get(callee_name, [])
 
-            # Only emit when unambiguous
-            if len(target_ids) != 1:
+            # Resolve ambiguity: prefer match in same directory as caller
+            if len(target_ids) == 0:
                 continue
+            if len(target_ids) > 1:
+                caller_dir = str(Path(caller_file.replace("\\", "/")).parent)
+                same_dir = [t for t in target_ids
+                            if t.replace("\\", "/").startswith(caller_dir + "/")]
+                if len(same_dir) == 1:
+                    target_ids = same_dir
+                else:
+                    continue  # still ambiguous after narrowing
 
             target_id = target_ids[0]
             if target_id == caller_id:

@@ -122,10 +122,23 @@ codegraph_html(path, formats?)           → regenerate visualizations (auto-run
 | Where is function X defined? | `codegraph_query node:"X"` |
 | What does module Y depend on? | `codegraph_query question:"what does Y import?"` |
 | What are all the classes? | `codegraph_nodes type:"class"` |
-| Most connected files? | `codegraph_report` |
+| Most connected files / god nodes? | `codegraph_report` |
 | What breaks if I change X? | `codegraph_affected node:"X"` |
+| Show me only the code for function X? | `get_symbol_detail name:"X"` |
+| Which tools have side effects? | `tool_registry` |
+
+### When to reach for each graph tool
+
+- **Unknown territory** (first look at any codebase): `codegraph_report` — shows bottlenecks + surprises first
+- **"Where is X defined?"**: `codegraph_query node:"X"` — faster than grep
+- **"What does this module do?"**: `codegraph_arch` — static module map, no reads needed
+- **Before any refactor or rename**: `codegraph_affected node:"X"` — see blast radius FIRST
+- **"List all classes/functions"**: `codegraph_nodes type:"class"` or `type:"function"`
+- **Files changed since last session**: `codegraph_build` is incremental — re-run after adding files
+- **"Show me just that function"**: `get_symbol_detail` — avoids reading the whole file
 
 **Never read files for structure questions — use graph tools first.**
+**`search` finds past decisions. `codegraph_query` finds code symbols. Different tools.**
 
 ---
 

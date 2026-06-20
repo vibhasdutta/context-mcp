@@ -248,10 +248,13 @@ async def _build(args: dict) -> dict:
     save_graph(root, graph_dict)
     generate_report(graph_dict, root)
     save_cache(root, cache)
+
+    cache_dir = str(Path(root) / "codegraph-cache")
+    viz = {}
     try:
-        export_all(graph_dict, str(Path(root) / "codegraph-cache"))
-    except Exception:
-        pass
+        viz = export_all(graph_dict, cache_dir) or {}
+    except Exception as e:
+        viz = {"error": str(e)}
 
     elapsed_ms = int((time.time() - t0) * 1000)
     result = {
@@ -264,6 +267,7 @@ async def _build(args: dict) -> dict:
         "deleted":     len(deleted),
         "time_ms":     elapsed_ms,
         "summary":     f"Built graph: {len(graph_dict.get('nodes', []))} nodes from code files.",
+        "outputs":     viz,
     }
 
     return result

@@ -34,7 +34,7 @@ Call `context` tool **before any tool or response** with:
 - `rootPath: "<absolute path to git repo root>"` — required for sandbox + graph lookup
 
 Returns:
-- `recentEntries` — last 15 entries; newest 5 have full content, rest have 200-char preview
+- `recentEntries` — last 15 entries; newest 2 + high-signal entries have full content, rest have 200-char preview
 - `activePlans` — in-progress plans; read them before starting any new work
 - `codegraph` — `{ built: true/false, nodes, edges, communities }`
 - `stats.totalEntries` — if ≥ 20, write a compaction summary before proceeding (see Rule 4)
@@ -116,10 +116,13 @@ codegraph_build(path)  →  AST graph: functions, classes, imports, edges
 ```
 codegraph_arch(path)                     → module map: every file, exports, imports
 codegraph_query(path, question?, node?)  → find symbol or answer structural question
-codegraph_nodes(path, type)              → list all nodes of a type
+codegraph_nodes(path, type)              → list all nodes of a type (class|function|module|file|struct|table)
 codegraph_report(path)                   → god nodes, clusters, structural analysis
 codegraph_affected(path, node, depth?)   → blast radius BFS — what breaks if X changes?
 codegraph_html(path, formats?)           → regenerate visualizations (auto-runs on every build)
+get_symbol_detail(name, path)            → source code for one function/class — no full file read
+tool_registry()                          → which tools have side effects + approval requirements
+safety_policy()                          → which actions need user confirmation
 ```
 
 | Question | Tool |
@@ -130,6 +133,15 @@ codegraph_html(path, formats?)           → regenerate visualizations (auto-run
 | List all classes/functions | `codegraph_nodes type:"class"` |
 | Most connected / central files | `codegraph_report` |
 | What breaks if I change X? | `codegraph_affected node:"X"` |
+| Show me just the code for function X | `get_symbol_detail name:"X"` |
+| Which tools are dangerous? | `tool_registry` or `safety_policy` |
+
+### When to reach for each graph tool
+
+- **Unknown territory**: `codegraph_report` first — god nodes + surprises
+- **Before any refactor or rename**: `codegraph_affected` — blast radius FIRST
+- **"Show me just that function"**: `get_symbol_detail` — avoids reading the whole file
+- **`search`** finds past decisions. **`codegraph_query`** finds code symbols. Different tools.
 
 ---
 
@@ -141,4 +153,4 @@ codegraph_html(path, formats?)           → regenerate visualizations (auto-run
 4. Compaction at ≥ 20 entries — before starting task
 5. Plan for multi-file work — `status:"done"` deletes it
 6. Search before asking about past work
-7. Graph tools before files
+7. Graph tools before files — `codegraph_affected` before any refactor
