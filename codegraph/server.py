@@ -88,13 +88,14 @@ TOOLS = [
     ),
     Tool(
         name="codegraph_nodes",
-        description="List all nodes of a given type in the graph.",
+        description="List all nodes of a given type, sorted by PageRank (most connected first).",
         inputSchema={
             "type": "object",
             "properties": {
-                "path":  {"type": "string"},
-                "type":  {"type": "string", "enum": ["class", "function", "module", "concept", "service", "file", "struct", "table"]},
-                "limit": {"type": "integer", "description": "Max results (default 50)"},
+                "path":         {"type": "string"},
+                "type":         {"type": "string", "enum": ["class", "function", "module", "concept", "service", "file", "struct", "table"]},
+                "limit":        {"type": "integer", "description": "Max results (default 50)"},
+                "token_budget": {"type": "integer", "description": "Return highest-rank nodes within this token budget"},
             },
             "required": ["path", "type"],
         },
@@ -131,6 +132,35 @@ TOOLS = [
                 "depth": {"type": "integer", "description": "BFS depth (default 2, max 5)"},
             },
             "required": ["path", "node"],
+        },
+    ),
+    Tool(
+        name="codegraph_filter",
+        description=(
+            "Filter graph nodes by semantic properties. Results sorted by PageRank (most connected first). "
+            "All filters optional — combine freely. "
+            "node_type: function|class|module|file. "
+            "exported/side_effect: bool. "
+            "return_type: substring match. "
+            "called_by/calls: node name. "
+            "file_pattern: glob. "
+            "token_budget: max tokens in response."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path":         {"type": "string"},
+                "node_type":    {"type": "string", "enum": ["function", "class", "module", "file"]},
+                "exported":     {"type": "boolean"},
+                "side_effect":  {"type": "boolean"},
+                "return_type":  {"type": "string", "description": "Substring match on return type"},
+                "called_by":    {"type": "string", "description": "Only nodes called by this name"},
+                "calls":        {"type": "string", "description": "Only nodes that call this name"},
+                "file_pattern": {"type": "string", "description": "Glob pattern for file path"},
+                "limit":        {"type": "integer", "description": "Max results (default 20)"},
+                "token_budget": {"type": "integer", "description": "Max tokens in response"},
+            },
+            "required": ["path"],
         },
     ),
     Tool(
@@ -174,6 +204,7 @@ async def _dispatch(name: str, args: dict):
     if name == "codegraph_arch":     return await _arch(args)
     if name == "codegraph_affected": return await _affected(args)
     if name == "codegraph_html":     return await _export_viz(args)
+    if name == "codegraph_filter":   return await _filter(args)
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -347,9 +378,23 @@ async def _nodes(args: dict) -> dict:
     graph_dict = load_graph(args["path"])
     if not graph_dict:
         raise ValueError("No graph found. Run codegraph_build first.")
-    node_type = args["type"]
-    limit     = args.get("limit", 50)
-    matched   = [n for n in graph_dict.get("nodes", []) if n.get("type") == node_type]
+    node_type    = args["type"]
+    limit        = int(args.get("limit", 50))
+    token_budget = args.get("token_budget")
+    matched = sorted(
+        [n for n in graph_dict.get("nodes", []) if n.get("type") == node_type],
+        key=lambda n: n.get("rank", 0), reverse=True,
+    )
+    if token_budget:
+        result, tokens = [], 0
+        for n in matched:
+            cost = len(json.dumps(n)) // 4
+            if tokens + cost > int(token_budget):
+                break
+            result.append(n)
+            tokens += cost
+        return {"type": node_type, "count": len(matched), "nodes": result,
+                "truncated": len(result) < min(len(matched), limit)}
     return {"type": node_type, "count": len(matched), "nodes": matched[:limit]}
 
 
@@ -367,6 +412,74 @@ async def _affected(args: dict) -> dict:
         raise ValueError("No graph found. Run codegraph_build first.")
     depth = min(int(args.get("depth", 2)), 5)
     return run_affected(graph_dict, args["node"], depth=depth)
+
+
+async def _filter(args: dict) -> dict:
+    """Filter graph nodes by semantic properties, sorted by PageRank."""
+    graph_dict = load_graph(args["path"])
+    if not graph_dict:
+        raise ValueError("No graph found. Run codegraph_build first.")
+
+    nodes = graph_dict.get("nodes", [])
+    edges = graph_dict.get("edges", [])
+
+    node_by_id = {n["id"]: n for n in nodes}
+    callers: dict[str, set] = {}
+    callees: dict[str, set] = {}
+    for e in edges:
+        src, tgt = e.get("from", ""), e.get("to", "")
+        callers.setdefault(tgt, set()).add(node_by_id.get(src, {}).get("name", src))
+        callees.setdefault(src, set()).add(node_by_id.get(tgt, {}).get("name", tgt))
+
+    node_type    = args.get("node_type")
+    exported     = args.get("exported")
+    side_effect  = args.get("side_effect")
+    return_type  = args.get("return_type")
+    called_by    = args.get("called_by")
+    calls_name   = args.get("calls")
+    file_pattern = args.get("file_pattern")
+    limit        = int(args.get("limit", 20))
+    token_budget = args.get("token_budget")
+
+    matched = []
+    for n in nodes:
+        if node_type and n.get("type") != node_type:
+            continue
+        if exported is not None and bool(n.get("exported")) != bool(exported):
+            continue
+        if side_effect is not None and bool(n.get("side_effect")) != bool(side_effect):
+            continue
+        if return_type:
+            if return_type.lower() not in (n.get("return_type") or "").lower():
+                continue
+        if called_by:
+            nid = n.get("id", "")
+            if called_by.lower() not in {c.lower() for c in callers.get(nid, set())}:
+                continue
+        if calls_name:
+            nid = n.get("id", "")
+            if calls_name.lower() not in {c.lower() for c in callees.get(nid, set())}:
+                continue
+        if file_pattern:
+            from fnmatch import fnmatch
+            if not fnmatch(n.get("file", ""), file_pattern.replace("\\", "/")):
+                continue
+        matched.append(n)
+
+    matched.sort(key=lambda n: n.get("rank", 0), reverse=True)
+
+    if token_budget:
+        result_nodes, tokens = [], 0
+        for n in matched:
+            cost = len(json.dumps(n)) // 4
+            if tokens + cost > int(token_budget):
+                break
+            result_nodes.append(n)
+            tokens += cost
+        return {"nodes": result_nodes, "count": len(matched),
+                "truncated": len(result_nodes) < min(len(matched), limit)}
+
+    return {"nodes": matched[:limit], "count": len(matched), "truncated": len(matched) > limit}
 
 
 async def _export_viz(args: dict) -> dict:

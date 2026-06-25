@@ -102,6 +102,26 @@ def build(all_nodes: list[dict]) -> "nx.DiGraph | dict":
     except Exception:
         pass
 
+    # Inheritance and implements edges (from enriched nodes)
+    for node in all_nodes:
+        nid = node.get("id", "")
+        if not nid:
+            continue
+        for parent_name in node.get("inherits", []):
+            target = node_by_name.get(parent_name)
+            if target and target != nid:
+                key = (nid, target)
+                if key not in seen_edges:
+                    seen_edges.add(key)
+                    G.add_edge(nid, target, relation="inherits", confidence="EXTRACTED")
+        for iface_name in node.get("implements", []):
+            target = node_by_name.get(iface_name)
+            if target and target != nid:
+                key = (nid, target)
+                if key not in seen_edges:
+                    seen_edges.add(key)
+                    G.add_edge(nid, target, relation="implements", confidence="EXTRACTED")
+
     return G
 
 

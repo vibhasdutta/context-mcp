@@ -271,6 +271,135 @@ def _find_enclosing_function(
     return None
 
 
+# ── Enrichment helpers ────────────────────────────────────────────────────────
+
+_SIDE_EFFECT_KEYWORDS = frozenset([
+    "write(", "update(", "delete(", "insert(", "save(", "emit(", "send(",
+    "fetch(", ".http", "db.", "fs.", "socket", "console.", ".log(",
+    "print(", "request(", "axios", "subprocess", "os.system", "os.remove",
+])
+
+
+def _has_side_effect(body_text: str) -> bool:
+    lower = body_text.lower()
+    return any(kw in lower for kw in _SIDE_EFFECT_KEYWORDS)
+
+
+def _is_exported(ts_node: "TSNode") -> bool:
+    """True if function/class is public/exported."""
+    parent = ts_node.parent
+    if parent and parent.type in {
+        "export_statement", "export_declaration", "exported_identifier",
+    }:
+        return True
+    if parent and parent.text:
+        text = parent.text.decode("utf-8", errors="ignore")[:20]
+        if text.strip().startswith("pub "):
+            return True
+    # Python: public if name doesn't start with _
+    name_node = ts_node.child_by_field_name("name")
+    if name_node:
+        name = name_node.text.decode("utf-8", errors="ignore")
+        return not name.startswith("_")
+    return True
+
+
+def _get_docstring(ts_node: "TSNode") -> str:
+    """Extract first docstring or comment from function/class body."""
+    body = ts_node.child_by_field_name("body")
+    if not body:
+        return ""
+    for child in body.children:
+        if child.type == "expression_statement":
+            for gc in child.children:
+                if gc.type in {"string", "concatenated_string"}:
+                    raw = gc.text.decode("utf-8", errors="ignore").strip()
+                    raw = raw.strip('"""').strip("'''").strip('"').strip("'").strip()
+                    if raw and len(raw) < 400:
+                        return raw
+        if child.type in {"comment", "block_comment", "line_comment"}:
+            raw = child.text.decode("utf-8", errors="ignore").strip()
+            raw = re.sub(r'^[/*#!\s]+', '', raw).strip()
+            raw = re.sub(r'\s*\*/$', '', raw).strip()
+            if raw and len(raw) < 400:
+                return raw
+    return ""
+
+
+def _get_return_type(ts_node: "TSNode") -> str:
+    """Extract return type annotation string."""
+    rt = ts_node.child_by_field_name("return_type")
+    if rt:
+        return rt.text.decode("utf-8", errors="ignore").lstrip("->").lstrip(":").strip()
+    past_params = False
+    for child in ts_node.children:
+        if child.type in {"formal_parameters", "parameters"}:
+            past_params = True
+        if past_params and child.type in {"type_annotation", "return_type"}:
+            return child.text.decode("utf-8", errors="ignore").lstrip(":").strip()
+    return ""
+
+
+def _get_params(ts_node: "TSNode") -> list:
+    """Extract parameter list as [{name, type, optional}]."""
+    params_node = ts_node.child_by_field_name("parameters")
+    if not params_node:
+        return []
+    result = []
+    for child in params_node.children:
+        if child.type in {
+            "identifier", "required_parameter", "optional_parameter",
+            "typed_parameter", "default_parameter", "rest_parameter",
+            "typed_default_parameter",
+        }:
+            name_node = child.child_by_field_name("name") or (
+                child if child.type == "identifier" else None
+            )
+            type_node = child.child_by_field_name("type")
+            if not name_node:
+                continue
+            param_name = name_node.text.decode("utf-8", errors="ignore").strip("?").strip()
+            param_type = (
+                type_node.text.decode("utf-8", errors="ignore").lstrip(":").strip()
+                if type_node else ""
+            )
+            optional = child.type == "optional_parameter" or "?" in name_node.text.decode()
+            if param_name and not param_name.startswith("("):
+                result.append({"name": param_name, "type": param_type, "optional": optional})
+    return result
+
+
+def _get_signature(ts_node: "TSNode", source: bytes, name: str) -> str:
+    """Return first logical line(s) of a function/class declaration (no body)."""
+    lines = source.decode("utf-8", errors="ignore").splitlines()
+    start = ts_node.start_point[0]
+    end   = ts_node.end_point[0]
+    sig_lines = []
+    for i in range(start, min(start + 5, end + 1)):
+        sig_lines.append(lines[i].strip() if i < len(lines) else "")
+        l = lines[i] if i < len(lines) else ""
+        if l.rstrip().endswith("{") or re.search(r':\s*(?:#.*)?$', l):
+            break
+    sig = " ".join(sig_lines)
+    sig = re.sub(r'\s*\{.*$', '', sig)
+    sig = re.sub(r'\s*:\s*(?:#.*)?$', '', sig).strip()
+    return sig or name
+
+
+def _get_last_modified(abs_path: str) -> str:
+    """Return ISO timestamp of last git commit touching this file, or empty string."""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["git", "log", "-1", "--format=%cI", "--", abs_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        ts = r.stdout.strip()
+        return ts if ts else ""
+    except Exception:
+        return ""
+
+
 def _extract_with_treesitter(source: bytes, rel_path: str, cfg: dict) -> list[dict]:
     lang = _get_language(cfg)
     if lang is None:
@@ -304,12 +433,76 @@ def _extract_with_treesitter(source: bytes, rel_path: str, cfg: dict) -> list[di
     for node in _walk(root, cfg["function_types"]):
         name = _get_name(node, cfg["name_field"])
         if name:
-            _add(name, "function", node.start_point[0])
+            entry = _add(name, "function", node.start_point[0])
+            if entry:
+                entry["signature"]   = _get_signature(node, source, name)
+                entry["params"]      = _get_params(node)
+                entry["return_type"] = _get_return_type(node)
+                entry["docstring"]   = _get_docstring(node)
+                entry["exported"]    = _is_exported(node)
+                entry["complexity"]  = node.end_point[0] - node.start_point[0] + 1
+                body_text = source[node.start_byte:node.end_byte].decode("utf-8", errors="ignore")
+                entry["side_effect"] = _has_side_effect(body_text)
 
     for node in _walk(root, cfg["class_types"]):
         name = _get_name(node, cfg["name_field"])
         if name:
-            _add(name, "class", node.start_point[0])
+            entry = _add(name, "class", node.start_point[0])
+            if entry:
+                entry["signature"]  = _get_signature(node, source, name)
+                entry["docstring"]  = _get_docstring(node)
+                entry["exported"]   = _is_exported(node)
+                entry["complexity"] = node.end_point[0] - node.start_point[0] + 1
+                entry["inherits"]   = []
+                entry["implements"] = []
+
+    # ── Inheritance / implements extraction ───────────────────────────────────
+    for node in _walk(root, cfg["class_types"]):
+        name = _get_name(node, cfg["name_field"])
+        if not name or name not in node_by_name:
+            continue
+        entry = node_by_name[name]
+        if "inherits" not in entry:
+            entry["inherits"] = []
+            entry["implements"] = []
+
+        for child in node.children:
+            # TypeScript / JavaScript: class_heritage > extends_clause / implements_clause
+            if child.type == "class_heritage":
+                for hc in child.children:
+                    if hc.type == "extends_clause":
+                        for ec in hc.children:
+                            if ec.type in {"identifier", "type_identifier"}:
+                                entry["inherits"].append(
+                                    ec.text.decode("utf-8", errors="ignore").strip()
+                                )
+                    elif hc.type == "implements_clause":
+                        for ic in hc.children:
+                            if ic.type in {"identifier", "type_identifier", "generic_type"}:
+                                t = ic.text.decode("utf-8", errors="ignore").strip()
+                                t = t.split("<")[0].strip()
+                                if t and t not in (",",):
+                                    entry["implements"].append(t)
+            # Python: class Foo(Base1, Base2):
+            elif child.type == "argument_list":
+                for ac in child.children:
+                    if ac.type == "identifier":
+                        entry["inherits"].append(
+                            ac.text.decode("utf-8", errors="ignore").strip()
+                        )
+            # Java / C#: superclass / base_list
+            elif child.type in {"superclass", "base_list"}:
+                for sc in child.children:
+                    if sc.type in {"type_identifier", "identifier"}:
+                        entry["inherits"].append(
+                            sc.text.decode("utf-8", errors="ignore").strip()
+                        )
+            elif child.type in {"super_interfaces", "interface_type_list"}:
+                for ic in child.children:
+                    if ic.type in {"type_identifier", "identifier"}:
+                        entry["implements"].append(
+                            ic.text.decode("utf-8", errors="ignore").strip()
+                        )
 
     # Associate call expressions with their enclosing function
     for node in _walk(root, cfg["call_types"]):
@@ -584,6 +777,9 @@ def extract(abs_path: str, rel_path: str) -> list[dict]:
     if _TS_AVAILABLE and cfg:
         nodes = _extract_with_treesitter(source_bytes, rel_path, cfg)
         if nodes:
+            last_mod = _get_last_modified(abs_path)
+            for n in nodes:
+                n.setdefault("last_modified", last_mod)
             return nodes
 
     try:
@@ -591,4 +787,8 @@ def extract(abs_path: str, rel_path: str) -> list[dict]:
     except Exception:
         return []
 
-    return _extract_with_regex(source_text, rel_path, ext)
+    nodes = _extract_with_regex(source_text, rel_path, ext)
+    last_mod = _get_last_modified(abs_path)
+    for n in nodes:
+        n.setdefault("last_modified", last_mod)
+    return nodes

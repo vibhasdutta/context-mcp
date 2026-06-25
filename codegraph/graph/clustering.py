@@ -264,7 +264,37 @@ def detect_communities(G) -> list[dict]:
                 G.nodes[nid]["community"] = comm_id
 
     G.graph["communities"] = communities
+
+    # PageRank centrality — stored as node.rank (float 0-1)
+    try:
+        ranks = _pagerank(G)
+        for nid, rank_val in ranks.items():
+            G.nodes[nid]["rank"] = round(rank_val, 6)
+    except Exception:
+        uniform = 1.0 / max(G.number_of_nodes(), 1)
+        for nid in G.nodes():
+            G.nodes[nid]["rank"] = uniform
+
     return communities
+
+
+def _pagerank(G, alpha: float = 0.85, max_iter: int = 200, tol: float = 1e-6) -> dict:
+    """Pure-Python power-iteration PageRank. No scipy/numpy required."""
+    nodes = list(G.nodes())
+    n = len(nodes)
+    if n == 0:
+        return {}
+    rank = {node: 1.0 / n for node in nodes}
+    for _ in range(max_iter):
+        dangling = sum(rank[node] for node in nodes if G.out_degree(node) == 0)
+        new_rank = {}
+        for node in nodes:
+            incoming = sum(rank[pred] / G.out_degree(pred) for pred in G.predecessors(node))
+            new_rank[node] = (1 - alpha) / n + alpha * (incoming + dangling / n)
+        if sum(abs(new_rank[node] - rank[node]) for node in nodes) < tol * n:
+            return new_rank
+        rank = new_rank
+    return rank
 
 
 def _community_label(G, member_ids: list) -> str:

@@ -72,15 +72,17 @@ export const definitions = [
   {
     name: 'codegraph_nodes',
     description:
-      'List all nodes of a given type in the graph. ' +
+      'List all nodes of a given type, sorted by PageRank (most connected first). ' +
       'type must be one of: class, function, module, concept, service, file, struct, table. ' +
-      'Use to enumerate all classes before refactoring, all functions in a module, or all files of a type.',
+      'Each node includes signature, return_type, side_effect, exported, docstring. ' +
+      'Pass token_budget to get the highest-rank nodes within a token limit.',
     inputSchema: {
       type: 'object',
       properties: {
-        path:  { type: 'string' },
-        type:  { type: 'string', enum: ['class', 'function', 'module', 'concept', 'service', 'file', 'struct', 'table'] },
-        limit: { type: 'integer', description: 'Max results (default 50)' },
+        path:         { type: 'string' },
+        type:         { type: 'string', enum: ['class', 'function', 'module', 'concept', 'service', 'file', 'struct', 'table'] },
+        limit:        { type: 'integer', description: 'Max results (default 50)' },
+        token_budget: { type: 'integer', description: 'Return highest-rank nodes within this token budget' },
       },
       required: ['path', 'type'],
     },
@@ -114,6 +116,30 @@ export const definitions = [
         depth: { type: 'integer', description: 'BFS depth (default 2, max 5)' },
       },
       required: ['path', 'node'],
+    },
+  },
+  {
+    name: 'codegraph_filter',
+    description:
+      'Filter graph nodes by semantic properties — all filters are optional and combinable. ' +
+      'Results sorted by PageRank (most connected first). ' +
+      'Use to answer questions like "show me all exported async functions with side effects" or ' +
+      '"which classes implement IService?" without reading any files.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path:         { type: 'string', description: 'Project root' },
+        node_type:    { type: 'string', enum: ['function', 'class', 'module', 'file'], description: 'Filter by node type' },
+        exported:     { type: 'boolean', description: 'Only exported nodes' },
+        side_effect:  { type: 'boolean', description: 'Filter by side-effect presence' },
+        return_type:  { type: 'string', description: 'Substring match on return type annotation' },
+        called_by:    { type: 'string', description: 'Only nodes called/imported by this name' },
+        calls:        { type: 'string', description: 'Only nodes that call this name' },
+        file_pattern: { type: 'string', description: 'Glob pattern for file path (e.g. "src/auth/**")' },
+        limit:        { type: 'integer', description: 'Max results (default 20)' },
+        token_budget: { type: 'integer', description: 'Max tokens in response' },
+      },
+      required: ['path'],
     },
   },
   {

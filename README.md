@@ -159,19 +159,34 @@ Any file or git operation outside that directory is rejected. Applies to all HTT
 codegraph_build(path)
 ```
 
-Parses codebase via tree-sitter AST (16 languages, regex fallback). Extracts functions, classes, imports, and call edges. Automatically generates visualizations on every build. Metadata saved to `<project>/codegraph-cache/`.
+Parses codebase via tree-sitter AST (16 languages, regex fallback). Extracts functions, classes, imports, call edges, and inheritance. Every node carries a full enriched schema: `signature`, `params`, `return_type`, `docstring`, `side_effect`, `exported`, `complexity`, `last_modified`. PageRank scores all nodes by connectivity. Metadata saved to `<project>/codegraph-cache/`.
 
 **Step 2 — Query** (instant, forever):
 
 ```
-codegraph_arch(path, limit?)              → module map: every file, its exports, its imports
-codegraph_query(path, question?, node?)   → structural question OR single-node lookup (or both)
-codegraph_nodes(path, type)               → list all nodes of a type
-codegraph_report(path)                    → god nodes, clusters, surprising connections
-codegraph_affected(path, node, depth?)    → BFS blast radius — what breaks if you change X?
+codegraph_arch(path, limit?)                     → module map: every file, its exports, its imports
+codegraph_query(path, question?, node?)          → structural question OR single-node lookup (or both)
+codegraph_nodes(path, type, token_budget?)       → all nodes of a type, sorted by PageRank
+codegraph_filter(path, node_type?, exported?,    → predicate filter: side_effect, return_type,
+  side_effect?, return_type?, called_by?,          called_by, file_pattern — rank-sorted output
+  calls?, file_pattern?, token_budget?)
+codegraph_report(path)                           → god nodes, clusters, surprising connections
+codegraph_affected(path, node, depth?)           → BFS blast radius — what breaks if you change X?
 ```
 
-`codegraph_query` accepts `question` (natural language), `node` (exact/partial name), or both. Use before reading any files.
+`codegraph_query` accepts `question` (natural language), `node` (exact/partial name), or both. `codegraph_filter` answers property questions ("which functions have side effects?", "all exported async handlers") without reading any files. Pass `token_budget` to any tool to get the highest-rank results within a token limit.
+
+**What's in each node (v1.2+):**
+
+| Field | Example |
+|---|---|
+| `signature` | `function fetchUser(id: string): Promise<User>` |
+| `return_type` | `Promise<User>` |
+| `side_effect` | `true` (db write, HTTP call, fs op detected) |
+| `exported` | `true` |
+| `docstring` | first comment or JSDoc string |
+| `rank` | PageRank score — higher = more connected |
+| `inherits` / `implements` | parent class / interface names |
 
 **Step 3 — Visualize** (auto-generated on every build):
 
