@@ -830,8 +830,18 @@ export function flushStore() { flushToDisk(); }
 
 // ── Auto-compaction ───────────────────────────────────────────────────────────
 
+// COMPACTION_THRESHOLD: shouldCompact's trigger point, and the AI-facing rule
+// in every platform template ("at >=20 entries, write a compaction summary").
+// COMPACTION_KEEP: how far compactProject drops the count once triggered.
+// These used to be the same knob pointed the wrong way (threshold 20, but
+// compactProject's own gate required 30) — shouldCompact fired on every save
+// from 21..29, so the AI wrote a fresh "type:compaction" summary each time,
+// while compactProject silently no-opped until 30, piling up duplicate
+// summaries before anything was ever actually removed. Keeping the two
+// concepts (trigger vs. how much to drop) explicit, but wired consistently,
+// fixes both the stall and the duplicate-summary spam.
 const COMPACTION_THRESHOLD = 20;
-const COMPACTION_TARGET    = 30;
+const COMPACTION_KEEP      = 10;
 
 export function shouldCompact(project) {
   init();
@@ -857,8 +867,11 @@ export function compactProject(project, summaryContent, { skipSummaryEntry = fal
       const scoreB = ageDaysB * 0.7 + (5 - (b.importance ?? 0)) * 0.3;
       return scoreB - scoreA;
     });
-  if (entries.length < COMPACTION_TARGET) return null;
-  const toRemove = new Set(entries.slice(0, COMPACTION_TARGET).map(e => e.id));
+  if (entries.length <= COMPACTION_THRESHOLD) return null;
+  // Drop down to COMPACTION_KEEP (well under the threshold) so this doesn't
+  // re-trigger on the very next save — keeps the most recent + important ones live.
+  const removeCount = entries.length - COMPACTION_KEEP;
+  const toRemove = new Set(entries.slice(0, removeCount).map(e => e.id));
   const removed = entries.filter(e => toRemove.has(e.id));
   for (const entry of removed) removeEntryFromData(data, entry);
   _dirtyProjects.add(proj);

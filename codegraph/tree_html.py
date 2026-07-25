@@ -158,13 +158,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     ];
     const phaseColors = {{ "Root": {{ fill:"#2a2a4e",stroke:"#4E79A7",collapsedFill:"#1a1a3e" }}, "Default": {{ fill:"#3a3a5e",stroke:"#5a5a8e",collapsedFill:"#2a2a4e" }} }};
     (initialJsonData.children||[]).forEach((c,i) => {{ const pal=PALETTE[i%PALETTE.length]; phaseColors[c.name]={{ fill:pal[0],stroke:pal[0],collapsedFill:pal[2] }}; }});
-    const levelPalettes = {{
-      0:{{fill:"#1a1a3e",stroke:"#4E79A7",collapsedFill:"#0f0f2a"}},
-      2:{{fill:"#59A14F",stroke:"#3d7a42",collapsedFill:"#1e4020"}},
-      3:{{fill:"#F28E2B",stroke:"#b8681c",collapsedFill:"#6a3808"}},
-      4:{{fill:"#B07AA1",stroke:"#845a78",collapsedFill:"#4a2040"}},
-      default:{{fill:"#3a3a5e",stroke:"#5a5a8e",collapsedFill:"#2a2a4e"}}
-    }};
+    const rootPalette = {{fill:"#1a1a3e",stroke:"#4E79A7",collapsedFill:"#0f0f2a"}};
     const svg = d3.select("#tree-svg");
     const margin = {{top:40,right:120,bottom:80,left:450}};
     const duration = 500;
@@ -181,9 +175,11 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     window.collapseAll=()=>{{ if(root.children) root.children.forEach(collapse); update(root); }};
     window.resetView=()=>{{ if(root.children) root.children.forEach(c=>{{ if(c.children||c._children) collapse(c); }}); update(root); }};
     function pal(d) {{
-      if (d.depth===0) return levelPalettes[0];
-      if (d.depth===1) return phaseColors[d.data.originalStageName]||phaseColors.Default;
-      return levelPalettes[d.depth]||levelPalettes.default;
+      if (d.depth===0) return rootPalette;
+      // originalStageName is the top-level ancestor's name at every depth (see
+      // transformData), so the whole subtree under e.g. "src" shares one color
+      // family instead of every node at a given depth looking identical.
+      return phaseColors[d.data.originalStageName]||phaseColors.Default;
     }}
     function update(src) {{
       const td = treemap(root);

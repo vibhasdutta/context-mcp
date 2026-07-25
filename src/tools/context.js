@@ -191,10 +191,15 @@ export async function handle(args, state) {
           // AI wrote a proper summary — compact old entries without creating a duplicate summary
           compaction = compactProject(entry.project, entry.content, { skipSummaryEntry: true });
         } else {
-          // AI didn't write a summary — fall back to TF-IDF extractive summarization
+          // AI didn't write a summary — fall back to TF-IDF extractive summarization.
+          // getContext returns newest-first; summarizeEntries groups/scores by content
+          // regardless of order, so pass everything being compacted, not a slice of it.
+          // (Previously `old.slice(old.length - 30)` computed a negative start whenever
+          // old.length < 30 — e.g. length 25 became slice(-5), summarizing only the 5
+          // oldest entries instead of all of them.)
           const old = getContext({ project: entry.project, limit: 500 });
           const { summarizeEntries: summarize } = await import('../summarizer.js');
-          const summaryContent = summarize(old.slice(old.length - 30), { project: entry.project || 'global', sessionLabel: 'auto-compaction', topN: 5 });
+          const summaryContent = summarize(old, { project: entry.project || 'global', sessionLabel: 'auto-compaction', topN: 5 });
           compaction = compactProject(entry.project, summaryContent);
         }
       }

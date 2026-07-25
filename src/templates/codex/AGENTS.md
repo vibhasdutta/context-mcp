@@ -85,9 +85,13 @@ codegraph_build(path)                    -> build AST graph + auto-generate all 
 codegraph_arch(path, limit?)             -> module map: files, exports, imports
 codegraph_query(path, question?, node?)  -> find symbol or answer structural question
 codegraph_nodes(path, type)              -> list all nodes of a type
+codegraph_filter(path, ...)              -> predicate filter (side_effect, return_type, called_by, exported, file_pattern) — no file reads
 codegraph_report(path)                   -> structural analysis
 codegraph_affected(path, node, depth?)   -> blast radius BFS — what breaks if X changes?
 codegraph_html(path, formats?)           -> regenerate visualizations on demand
+get_symbol_detail(name, path)            -> source code for one function/class — no full file read
+tool_registry()                          -> which tools have side effects + approval requirements
+safety_policy()                          -> which actions need user confirmation
 ```
 
 Decision rules:
@@ -95,7 +99,9 @@ Decision rules:
 - "Where is X?": `codegraph_query node:"X"`
 - Before any refactor: `codegraph_affected node:"X"` (blast radius)
 - List all classes: `codegraph_nodes type:"class"`
+- Which functions have side effects / a given return type: `codegraph_filter`
 - Just the function body: `get_symbol_detail name:"X"` (no full file read)
+- Which tools are dangerous: `tool_registry` or `safety_policy`
 - `search` finds past decisions. `codegraph_query` finds code symbols. Different tools.
 
 Read files only when you need exact bug or implementation details not in the graph.

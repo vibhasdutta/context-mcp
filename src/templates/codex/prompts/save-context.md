@@ -12,13 +12,9 @@ Parse the following to determine the fields: $ARGUMENTS
 - `title`: first sentence or phrase, up to 120 chars.
 - `why`: why it mattered, what problem it solved, or what constraint it revealed.
 - `outcome`: what changed, what was verified, what shipped, and which files were affected.
-- `files`: list of files changed, required for task/bug types.
+- `files`: list of files changed, if any.
 - `content`: full argument text.
-- `type`: auto-detect:
-  - bug/fix/error -> `"bug"`
-  - task/done/complete/shipped/implemented -> `"task"`
-  - decision/chose/decided/approach -> `"decision"`
-  - config/env/secret/deploy -> `"config"`
-  - otherwise -> `"note"`
+- `type`: always `"note"` (the only entry type besides `"compaction"`, which is reserved for session summaries).
+- `tags`: auto-detect a category tag from the content — `bug`/`fix`/`error` -> `"bug"`, `task`/`done`/`complete`/`shipped`/`implemented` -> `"task"`, `decision`/`chose`/`decided`/`approach` -> `"decision"`, `config`/`env`/`secret`/`deploy` -> `"config"` — omit if none match.
 
-Confirm to the user: title, type, why, outcome, and project.
+Confirm to the user: title, tags, why, outcome, and project.

@@ -25,17 +25,15 @@ contextconfig.json
 # -- ContextGraph build outputs -----------------------------------------------
 codegraph-cache/
 
+# -- Local tool caches ---------------------------------------------------------
+scrape/
+
 # -- AI / IDE platform folders (user-specific, varies per machine) ------------
 .claude/
-.cursor/
 .vscode/
 .idea/
-.gemini/
 .codex/
-.windsurf/
-
-
-.mcp.json
+.agents/
 
 # -- Installed template files (written by ctx install, user-specific) ---------
 # Source templates live in src/templates/ -- these are installed copies

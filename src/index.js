@@ -22,11 +22,10 @@ Options:
 
 Platform setup (stdio):
   Claude Code:   claude mcp add context-mcp npx context-mcp-server@latest
-  Cursor:        add to .cursor/mcp.json
   VS Code:       add to .vscode/mcp.json
-  Gemini CLI:    add to .gemini/settings.json
+  Antigravity:   add to .agents/mcp_config.json (or ~/.gemini/config/mcp_config.json)
   Codex CLI:     add to .codex/config.toml
-  Windsurf:      add to global mcp_config.json
+  Hermes Agent:  add to ~/.hermes/config.yaml
 
 Examples:
   context-mcp

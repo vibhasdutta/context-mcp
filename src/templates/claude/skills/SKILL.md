@@ -117,6 +117,7 @@ codegraph_build(path)  →  AST graph: functions, classes, imports, edges
 codegraph_arch(path)                     → module map: every file, exports, imports
 codegraph_query(path, question?, node?)  → find symbol or answer structural question
 codegraph_nodes(path, type)              → list all nodes of a type (class|function|module|file|struct|table)
+codegraph_filter(path, ...)              → predicate filter (side_effect, return_type, called_by, exported, file_pattern) — no file reads
 codegraph_report(path)                   → god nodes, clusters, structural analysis
 codegraph_affected(path, node, depth?)   → blast radius BFS — what breaks if X changes?
 codegraph_html(path, formats?)           → regenerate visualizations (auto-runs on every build)
@@ -131,6 +132,7 @@ safety_policy()                          → which actions need user confirmatio
 | Where is function/class X defined? | `codegraph_query node:"X"` |
 | What does module Y import? | `codegraph_query question:"..."` |
 | List all classes/functions | `codegraph_nodes type:"class"` |
+| Which functions have side effects / a given return type? | `codegraph_filter` |
 | Most connected / central files | `codegraph_report` |
 | What breaks if I change X? | `codegraph_affected node:"X"` |
 | Show me just the code for function X | `get_symbol_detail name:"X"` |

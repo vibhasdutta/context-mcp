@@ -122,7 +122,7 @@ def to_html(graph_dict: dict, output_path: str) -> str:
 <meta charset="utf-8">
 <title>CodeGraph</title>
 <script src="https://unpkg.com/vis-network@9.1.9/dist/vis-network.min.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/vis-network@9.1.9/dist/dist/vis-network.min.css">
+<link rel="stylesheet" href="https://unpkg.com/vis-network@9.1.9/dist/vis-network.min.css">
 {_html_styles()}
 </head>
 <body>

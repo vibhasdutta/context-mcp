@@ -11,7 +11,7 @@
 
 Persistent memory and codebase knowledge graph for AI coding assistants — delivered as a single MCP server.
 
-One shared context store across Claude Code, Cursor, Gemini CLI, Codex, Windsurf, VS Code Copilot, Claude.ai, and ChatGPT. Save context from one AI, pick it up in another.
+One shared context store across Claude Code, VS Code Copilot, Google Antigravity (2.0 / IDE / CLI), Codex CLI, Hermes Agent, Claude.ai, and ChatGPT. Save context from one AI, pick it up in another.
 
 ---
 
@@ -73,11 +73,10 @@ To install for a specific platform only:
 
 ```bash
 ctx install --claude      # Claude Code
-ctx install --cursor      # Cursor
 ctx install --vscode      # VS Code Copilot
-ctx install --gemini      # Gemini CLI
+ctx install --antigravity # Google Antigravity (2.0 / IDE / CLI)
 ctx install --codex       # Codex CLI
-ctx install --windsurf    # Windsurf
+ctx install --hermes      # Hermes Agent
 ```
 
 For Codex project installs, `ctx install --codex` writes:
@@ -93,6 +92,17 @@ ctx online               # start in background, prints OAuth credentials + URL
 ctx online --restart     # force restart
 ctx online --port 3200   # different port
 ```
+
+### Claude Code plugin
+
+This repo is also a self-hosted Claude Code plugin marketplace — an alternative to `ctx install --claude` that doesn't require cloning or npm-installing anything yourself:
+
+```bash
+claude plugin marketplace add vibhasdutta/context-mcp
+claude plugin install context-mcp@context-mcp-marketplace
+```
+
+or from inside a session: `/plugin marketplace add vibhasdutta/context-mcp` then `/plugin install context-mcp@context-mcp-marketplace`. This installs the `context-mcp` skill, the Bash pre/post-tool-use hooks, and registers the MCP server (still launched via `npx context-mcp-server@latest`) — everything `ctx install --claude` writes into `~/.claude/`, bundled as one installable unit. `ctx install --initial` is still required once to install the ContextGraph Python environment.
 
 ---
 
@@ -143,7 +153,7 @@ Any file or git operation outside that directory is rejected. Applies to all HTT
 ### Memory
 
 - `context.resume` — loads recent entries, active plans, and graph status; registers `rootPath` for sandboxing
-- `context.save` — store context with 4 types: `decision`, `bug`, `note`, `config`
+- `context.save` — store context as `note` (or `compaction` for session summaries); categorize with free-form `tags`
 - `context.get` / `context.update` / `context.delete` — full CRUD, single or batch
 - `search` — keyword-first, semantic fallback
 - `plan` — auto-triggered when AI makes any plan; saves a markdown summary to a `planDir` you specify

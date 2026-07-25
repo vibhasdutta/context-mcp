@@ -192,10 +192,17 @@ def to_html(graph_dict: dict, output_path: str) -> str:
 
     node_map = {n["id"]: n for n in nodes}
 
+    # Full per-community sections (with a Mermaid diagram each) only for the
+    # largest communities — a project with hundreds of communities would
+    # otherwise render hundreds of Mermaid diagrams on one page, which is slow
+    # to the point of being unusable and mostly noise from single-node clusters.
+    MAX_COMMUNITY_SECTIONS = 20
+    shown_communities = sorted(communities, key=lambda c: -len(c.get("members", [])))[:MAX_COMMUNITY_SECTIONS]
+
     # Navigation
     nav_links = '<nav class="nav"><a href="#overview">Overview</a>' + "".join(
         '<a href="#comm-{}">{}</a>'.format(c["id"], escape(c.get("label", f"C{c['id']}")))
-        for c in communities[:20]
+        for c in shown_communities
     ) + "</nav>"
 
     # Overview section
@@ -207,9 +214,17 @@ def to_html(graph_dict: dict, output_path: str) -> str:
         "</ul></div>"
     ) if god_names else ""
 
+    omitted = len(communities) - len(shown_communities)
+    scope_note = (
+        f"<p>Showing the {len(shown_communities)} largest communities "
+        f"({omitted} smaller/single-node communities omitted for readability).</p>"
+        if omitted > 0 else ""
+    )
+
     overview_section = f"""<section id="overview">
 <h2>Architecture Overview</h2>
 <p>{len(nodes)} nodes · {len(edges)} edges · {len(communities)} communities · generated {escape(generated)}</p>
+{scope_note}
 {god_html}
 <div class="mermaid">
 {overview_mermaid}
@@ -218,7 +233,7 @@ def to_html(graph_dict: dict, output_path: str) -> str:
 
     # Per-community sections
     comm_sections = []
-    for c in communities:
+    for c in shown_communities:
         cid = c["id"]
         label = c.get("label", f"Community {cid}")
         members = c.get("members", [])

@@ -111,9 +111,13 @@ codegraph_build(path)
 codegraph_arch(path, limit?)             → module map: every file, its exports, its imports
 codegraph_query(path, question?, node?)  → find function/class/file or answer structural question
 codegraph_nodes(path, type)              → list all nodes of a type
+codegraph_filter(path, ...)              → predicate filter (side_effect, return_type, called_by, exported, file_pattern) — no file reads
 codegraph_report(path)                   → god nodes, clusters, structural analysis
 codegraph_affected(path, node, depth?)   → blast radius BFS — what breaks if X changes?
 codegraph_html(path, formats?)           → regenerate visualizations (auto-runs on every build)
+get_symbol_detail(name, path)            → source code for one function/class — no full file read
+tool_registry()                          → which tools have side effects + approval requirements
+safety_policy()                          → which actions need user confirmation
 ```
 
 | Question | Tool |
@@ -122,6 +126,7 @@ codegraph_html(path, formats?)           → regenerate visualizations (auto-run
 | Where is function X defined? | `codegraph_query node:"X"` |
 | What does module Y depend on? | `codegraph_query question:"what does Y import?"` |
 | What are all the classes? | `codegraph_nodes type:"class"` |
+| Which functions have side effects / a given return type? | `codegraph_filter` |
 | Most connected files / god nodes? | `codegraph_report` |
 | What breaks if I change X? | `codegraph_affected node:"X"` |
 | Show me only the code for function X? | `get_symbol_detail name:"X"` |
